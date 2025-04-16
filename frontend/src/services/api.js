@@ -1,6 +1,38 @@
 import axios from "axios";
 
 const API_BASE_URL = "http://127.0.0.1:5000";
+axios.defaults.withCredentials = true;
+
+export const registerUser = async (username, password) => {
+  try {
+    const response = await axios.post(`${API_BASE_URL}/register`, { username, password });
+    return response.data;
+  } catch (error) {
+    console.error("Error registering user:", error.response ? error.response.data : error);
+    throw error;
+  }
+};
+
+export const loginUser = async (username, password) => {
+  try {
+    const response = await axios.post(`${API_BASE_URL}/login`, { username, password });
+    return response.data;
+  } catch (error) {
+    console.error("Error logging in:", error.response ? error.response.data : error);
+    throw error;
+  }
+};
+
+export const logoutUser = async () => {
+  try {
+    const response = await axios.post(`${API_BASE_URL}/logout`);
+    return response.data;
+  } catch (error) {
+    console.error("Error logging out:", error.response ? error.response.data : error);
+    throw error;
+  }
+};
+
 
 export const addWord = async (word, translation, partOfSpeech, article) => {
     console.log("Sending data:", { word, translation, partOfSpeech, article }); // Log the data before sending  
@@ -232,12 +264,15 @@ export const endConjugationGameAPI = async (
 };
 
 export async function getStats(range = "all") {
-  const res = await fetch(`${API_BASE_URL}/stats?range=${range}`);
+  const res = await fetch(`${API_BASE_URL}/stats?range=${range}`, {
+    credentials: "include"
+  });
   if (!res.ok) {
     throw new Error("Failed to fetch stats");
   }
   return res.json();
 }
+
 
         
   

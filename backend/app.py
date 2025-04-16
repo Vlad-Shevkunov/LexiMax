@@ -1,17 +1,124 @@
-from flask import Flask, jsonify, request
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
 from db import get_db_connection
 from flask_cors import CORS
 import random
 from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor  # ✅ Add this import
+import os 
+from dotenv import load_dotenv
+load_dotenv()  # This loads the variables from .env
 
 
 app = Flask(__name__)
-CORS(app)
+# ✅ Important: specify the exact origin and enable credentials
+CORS(
+    app,
+    resources={r"/*": {"origins": os.environ.get("CORS_ORIGIN")}},
+    supports_credentials=True
+)
+
+app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+app.config['SESSION_COOKIE_SECURE'] = True  # Set True if you serve over HTTPS
+
+
+app.secret_key = os.environ.get("SECRET_KEY")
+    
+def build_where_clause(conditions):
+    """
+    Given a list of conditions (strings), return a WHERE clause that joins
+    them with AND. If no conditions, returns an empty string.
+    """
+    if conditions:
+        return "WHERE " + " AND ".join(conditions)
+    return ""
+
+
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if "user_id" not in session:
+            return jsonify({"error": "Unauthorized, please log in."}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+@app.route('/current_user', methods=["GET"])
+@login_required
+def current_user():
+    username = session.get("username")
+    print("username", username)
+    return jsonify({"username": username})
+
+# Home route that redirects to dashboard if logged in
+@app.route('/register', methods=["POST"])
+def register():
+    data = request.get_json()
+    username = data.get("username")
+    password = data.get("password")
+    if not username or not password:
+        return jsonify({"error": "Username and password required"}), 400
+
+    hashed_password = generate_password_hash(password)
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO users (username, password_hash) VALUES (%s, %s) RETURNING id;",
+            (username, hashed_password)
+        )
+        user = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+        # Save info in session so that a cookie is set
+        session["user_id"] = user["id"]
+        session["username"] = username
+        return jsonify({"message": "User registered", "user_id": user["id"]}), 201
+    except Exception as e:
+        print("Registration Error:", e)
+        return jsonify({"error": "Registration failed. Username might be taken."}), 500
+
+
+@app.route('/login', methods=["POST"])
+def login():
+    data = request.get_json()
+    username = data.get("username")
+    password = data.get("password")
+    if not username or not password:
+        return jsonify({"error": "Username and password required"}), 400
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id, password_hash FROM users WHERE username = %s;", (username,))
+        user = cur.fetchone()
+        print(user)
+        cur.close()
+        conn.close()
+
+        if user is None or not check_password_hash(user["password_hash"], password):
+            return jsonify({"error": "Invalid username or password"}), 401
+
+        # Valid credentials; set session data to create a session cookie.
+        session["user_id"] = user["id"]
+        session["username"] = username
+        return jsonify({"message": "Logged in successfully", "user_id": user["id"]})
+    except Exception as e:
+        print("Login Error:", e)
+        return jsonify({"error": "Login failed due to a server error."}), 500
+
+
+@app.route('/logout', methods=["POST"])
+def logout():
+    session.clear()  # Remove all keys from session
+    return jsonify({"message": "Logged out successfully"})
 
 # Updated API to handle multiple translations
 @app.route('/add_word', methods=['POST'])
+@login_required
 def add_word():
     try:
         data = request.json
@@ -19,6 +126,7 @@ def add_word():
         translation = data.get('translation')  # Single translation
         part_of_speech = data.get('part_of_speech')
         article = data.get('article')
+        user_id=session.get("user_id")
         if article in ["none", "", None]:  
             article = "none"
 
@@ -29,34 +137,36 @@ def add_word():
         cur = conn.cursor()
 
         # ✅ Check if the word already exists
-        cur.execute("SELECT id, translations FROM vocabulary WHERE LOWER(word) = LOWER(%s);", (word,))
+        cur.execute("SELECT id, translations FROM vocabulary WHERE LOWER(word) = LOWER(%s) AND user_id = %s;", (word, user_id))
         result = cur.fetchone()
-
+        print("here")
         if result:
             word_id = result["id"]  # ✅ Use dictionary-style access
             existing_translations = result["translations"]
+            print("here")
 
             # ✅ Append new translation only if it's unique
             if translation not in existing_translations:
                 updated_translations = existing_translations + [translation]
                 cur.execute(
-                    "UPDATE vocabulary SET translations = %s WHERE id = %s;",
-                    (updated_translations, word_id)
+                    "UPDATE vocabulary SET translations = %s WHERE id = %s AND user_id = %s;",
+                    (updated_translations, word_id, user_id)
                 )
         else:
             # ✅ Insert new word & get ID
+            print("here")
             cur.execute(
-                "INSERT INTO vocabulary (word, translations, part_of_speech, article) VALUES (%s, %s, %s, %s) RETURNING id;",
-                (word, [translation], part_of_speech, article)
+                "INSERT INTO vocabulary (word, translations, part_of_speech, article, user_id) VALUES (%s, %s, %s, %s, %s) RETURNING id;",
+                (word, [translation], part_of_speech, article, user_id)
             )
             result=cur.fetchone()
             word_id = result["id"]
 
             # ✅ Insert into word_tracking
             cur.execute(
-                "INSERT INTO word_tracking (word_id, word, total_attempts, mistake_timestamps, last_accessed, score) "
-                "VALUES (%s, %s, 0, ARRAY[]::TIMESTAMPTZ[], NOW(), 5);",
-                (word_id, word)
+                "INSERT INTO word_tracking (word_id, word, total_attempts, mistake_timestamps, last_accessed, score, user_id) "
+                "VALUES (%s, %s, 0, ARRAY[]::TIMESTAMPTZ[], NOW(), 5, %s);",
+                (word_id, word, user_id)
             )
 
         conn.commit()
@@ -71,11 +181,13 @@ def add_word():
 
     
 @app.route('/get_words', methods=['GET'])
+@login_required
 def get_words():
     try:
+        user_id=session.get("user_id")
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT * FROM vocabulary;")
+        cur.execute("SELECT * FROM vocabulary WHERE user_id = %s;", (user_id,))
         words = cur.fetchall()
         cur.close()
         conn.close()
@@ -84,8 +196,10 @@ def get_words():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/update_word/<int:word_id>', methods=['PUT'])
+@login_required
 def update_word(word_id):
     try:
+        user_id=session.get("user_id")
         data = request.json
         new_word = data.get('word').strip().lower()
         translations = data.get('translation', [])  # Now handling a full list
@@ -102,7 +216,7 @@ def update_word(word_id):
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
         # ✅ Fetch the existing word before updating
-        cur.execute("SELECT word FROM vocabulary WHERE id = %s;", (word_id,))
+        cur.execute("SELECT word FROM vocabulary WHERE id = %s AND user_id = %s;", (word_id, user_id))
         result = cur.fetchone()
 
         if not result:
@@ -114,16 +228,16 @@ def update_word(word_id):
         cur.execute("""
             UPDATE vocabulary 
             SET word = %s, translations = %s, part_of_speech = %s, article = %s
-            WHERE id = %s;
-        """, (new_word, translations, part_of_speech, article, word_id))
+            WHERE id = %s AND user_id = %s;
+        """, (new_word, translations, part_of_speech, article, word_id, user_id))
 
         # ✅ If the word itself changed, update `word_tracking`
         if old_word != new_word:
             cur.execute("""
                 UPDATE word_tracking 
                 SET word = %s
-                WHERE word_id = %s;
-            """, (new_word, word_id))
+                WHERE word_id = %s AND user_id = %s;
+            """, (new_word, word_id, user_id))
 
         conn.commit()
         cur.close()
@@ -138,23 +252,25 @@ def update_word(word_id):
 
 
 @app.route('/delete_word/<int:word_id>', methods=['DELETE'])
+@login_required
 def delete_word(word_id):
     try:
+        user_id=session.get("user_id")
         conn = get_db_connection()
         cur = conn.cursor()
 
         # ✅ First, check if the word exists before deleting
-        cur.execute("SELECT word FROM vocabulary WHERE id = %s;", (word_id,))
+        cur.execute("SELECT word FROM vocabulary WHERE id = %s AND user_id = %s;", (word_id, user_id))
         result = cur.fetchone()
 
         if not result:
             return jsonify({"error": "Word not found"}), 404
 
         # ✅ Delete from `word_tracking` first (to avoid orphaned references)
-        cur.execute("DELETE FROM word_tracking WHERE word_id = %s;", (word_id,))
+        cur.execute("DELETE FROM word_tracking WHERE word_id = %s AND user_id=%s;", (word_id, user_id))
 
         # ✅ Delete from `vocabulary`
-        cur.execute("DELETE FROM vocabulary WHERE id = %s;", (word_id,))
+        cur.execute("DELETE FROM vocabulary WHERE id = %s AND user_id = %s;", (word_id, user_id))
 
         conn.commit()
         cur.close()
@@ -169,8 +285,10 @@ def delete_word(word_id):
 
 
 @app.route("/start_game", methods=["POST"])
+@login_required
 def start_game():
     try:
+        user_id=session.get("user_id")
         if not request.is_json:
             return jsonify({"error": "Invalid JSON format"}), 400
 
@@ -223,9 +341,10 @@ def start_game():
             SELECT v.id, v.word, v.translations, v.part_of_speech, v.article
             FROM vocabulary v
             JOIN word_tracking wt ON v.id = wt.word_id
+            WHERE v.user_id = %s
             ORDER BY RANDOM() * wt.score DESC
             LIMIT 500;
-        """)
+        """, (user_id,))
         words = cur.fetchall()
 
         cur.close()
@@ -242,10 +361,11 @@ def start_game():
 
 
 @app.route("/end_game", methods=["POST"])
+@login_required
 def end_game():
     if not request.is_json:
         return jsonify({"error": "Invalid JSON format"}), 400
-
+    user_id=session.get("user_id")
     data = request.get_json()
     results = data.get("results")       # List of word attempts
     time_limit = data.get("time_limit") / 60
@@ -265,9 +385,9 @@ def end_game():
         # Insert a row in game_runs, now including 'ungraded'
         cur.execute("""
             INSERT INTO game_runs 
-              (time_limit, game_type, zen_mode, total_words_attempted, correct_words, ungraded)
+              (time_limit, game_type, zen_mode, total_words_attempted, correct_words, ungraded, user_id)
             VALUES (%s, %s, %s, %s, %s, %s);
-        """, (time_limit, game_type, zen_mode, total_attempts, score, ungraded))
+        """, (time_limit, game_type, zen_mode, total_attempts, score, ungraded, user_id))
 
         # For each word attempt, update word_tracking
         for result in results:
@@ -283,8 +403,8 @@ def end_game():
                         WHEN %s = FALSE THEN array_append(mistake_timestamps, NOW())
                         ELSE mistake_timestamps
                     END
-                WHERE word_id = %s;
-            """, (correct, word_id))
+                WHERE word_id = %s AND user_id= %s;
+            """, (correct, word_id, user_id))
 
             # Adjust the word's score
             cur.execute("""
@@ -294,8 +414,8 @@ def end_game():
                         EXTRACT(EPOCH FROM (NOW() - last_accessed)) / 3600,
                     3
                 )
-                WHERE word_id = %s;
-            """, (word_id,))
+                WHERE word_id = %s AND user_id= %s;
+            """, (word_id, user_id))
 
         conn.commit()
         cur.close()
@@ -311,9 +431,11 @@ def end_game():
 
 # ✅ Add a new conjugation entry
 @app.route('/add_conjugation', methods=['POST'])
+@login_required
 def add_conjugation():
     try:
         data = request.json
+        user_id=session.get("user_id")
         verb = data.get('verb').strip().lower()
         person = data.get('person').strip().lower()
         tense = data.get('tense').strip().lower()
@@ -332,8 +454,8 @@ def add_conjugation():
         # ✅ Check if this conjugation already exists for this verb
         cur.execute("""
             SELECT id FROM conjugations
-            WHERE verb = %s AND person = %s AND tense = %s;
-        """, (verb, person, tense))
+            WHERE verb = %s AND person = %s AND tense = %s AND user_id = %s;
+        """, (verb, person, tense, user_id))
         result = cur.fetchone()
 
         if result:
@@ -343,19 +465,19 @@ def add_conjugation():
         else:
             # ✅ Insert new conjugation and get its ID
             cur.execute("""
-                INSERT INTO conjugations (verb, person, tense, conjugation, irregular, pronominal, verb_group)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO conjugations (verb, person, tense, conjugation, irregular, pronominal, verb_group, user_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id;
-            """, (verb, person, tense, conjugation, irregular, pronominal, verb_group))
+            """, (verb, person, tense, conjugation, irregular, pronominal, verb_group, user_id))
             result = cur.fetchone()
             conjugation_id = result["id"]
             message = "Conjugation added successfully."
 
             # ✅ Also insert into `conjugation_tracking`
             cur.execute("""
-                INSERT INTO conjugation_tracking (id, verb, person, tense, total_attempts, mistake_timestamps, last_accessed, score)
-                VALUES (%s, %s, %s, %s, 0, ARRAY[]::TIMESTAMPTZ[], NOW(), 5);
-            """, (conjugation_id, verb, person, tense))
+                INSERT INTO conjugation_tracking (id, verb, person, tense, total_attempts, mistake_timestamps, last_accessed, score, user_id)
+                VALUES (%s, %s, %s, %s, 0, ARRAY[]::TIMESTAMPTZ[], NOW(), 5, %s);
+            """, (conjugation_id, verb, person, tense, user_id))
 
         conn.commit()
         cur.close()
@@ -370,11 +492,13 @@ def add_conjugation():
 
 # ✅ Retrieve all conjugations
 @app.route('/get_conjugations', methods=['GET'])
+@login_required
 def get_conjugations():
     try:
         conn = get_db_connection()
+        user_id=session.get("user_id")
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM conjugations;")
+        cur.execute("SELECT * FROM conjugations WHERE user_id = %s;", (user_id,))
         conjugations = cur.fetchall()
         cur.close()
         conn.close()
@@ -384,9 +508,11 @@ def get_conjugations():
 
 
 @app.route('/update_conjugation/<int:conjugation_id>', methods=['PUT'])
+@login_required
 def update_conjugation(conjugation_id):
     try:
         data = request.json
+        user_id=session.get("user_id")
         new_verb = data.get('verb').strip().lower()
         new_person = data.get('person').strip().lower()
         new_tense = data.get('tense').strip().lower()
@@ -405,8 +531,8 @@ def update_conjugation(conjugation_id):
 
         # ✅ Fetch the existing conjugation before updating
         cur.execute("""
-            SELECT verb, person, tense FROM conjugations WHERE id = %s;
-        """, (conjugation_id,))
+            SELECT verb, person, tense FROM conjugations WHERE id = %s AND user_id = %s;
+        """, (conjugation_id, user_id))
         result = cur.fetchone()
 
         if not result:
@@ -418,16 +544,16 @@ def update_conjugation(conjugation_id):
         cur.execute("""
             UPDATE conjugations 
             SET verb = %s, person = %s, tense = %s, conjugation = %s, irregular = %s, pronominal = %s, verb_group= %s
-            WHERE id = %s;
-        """, (new_verb, new_person, new_tense, new_conjugation, irregular, pronominal, verb_group, conjugation_id))
+            WHERE id = %s AND user_id = %s;
+        """, (new_verb, new_person, new_tense, new_conjugation, irregular, pronominal, verb_group, conjugation_id, user_id))
 
         # ✅ If the verb, person, or tense changed, update `conjugation_tracking`
         if (old_verb, old_person, old_tense) != (new_verb, new_person, new_tense):
             cur.execute("""
                 UPDATE conjugation_tracking 
                 SET verb = %s, person = %s, tense = %s
-                WHERE id = %s;
-            """, (new_verb, new_person, new_tense, conjugation_id))
+                WHERE id = %s AND user_id = %s;
+            """, (new_verb, new_person, new_tense, conjugation_id, user_id))
 
         conn.commit()
         cur.close()
@@ -440,23 +566,25 @@ def update_conjugation(conjugation_id):
         return jsonify({"error": str(e)}), 500
     
 @app.route('/delete_conjugation/<int:conjugation_id>', methods=['DELETE'])
+@login_required
 def delete_conjugation(conjugation_id):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+        user_id=session.get("user_id")
 
         # ✅ First, check if the conjugation exists
-        cur.execute("SELECT verb FROM conjugations WHERE id = %s;", (conjugation_id,))
+        cur.execute("SELECT verb FROM conjugations WHERE id = %s AND user_id = %s;", (conjugation_id, user_id))
         result = cur.fetchone()
 
         if not result:
             return jsonify({"error": "Conjugation not found"}), 404
 
         # ✅ Delete from `conjugation_tracking` first
-        cur.execute("DELETE FROM conjugation_tracking WHERE id = %s;", (conjugation_id,))
+        cur.execute("DELETE FROM conjugation_tracking WHERE id = %s AND user_id = %s;", (conjugation_id, user_id))
 
         # ✅ Delete from `conjugations`
-        cur.execute("DELETE FROM conjugations WHERE id = %s;", (conjugation_id,))
+        cur.execute("DELETE FROM conjugations WHERE id = %s AND user_id = %s;", (conjugation_id, user_id))
 
         conn.commit()
         cur.close()
@@ -471,12 +599,14 @@ def delete_conjugation(conjugation_id):
 
 
 @app.route("/start_conjugation_game", methods=["POST"])
+@login_required
 def start_conjugation_game():
     try:
         if not request.is_json:
             return jsonify({"error": "Invalid JSON format"}), 400
 
         data = request.get_json()
+        user_id=session.get("user_id")
         print("Received JSON Data:", data)
 
         # 1) Parse advanced filters
@@ -526,6 +656,7 @@ def start_conjugation_game():
 
         # 2) Build WHERE clauses
         where_clauses = []
+        where_clauses.append("c.user_id = %(user_id)s")
         params = {}
 
         # (a) Filter by "mode" => irregular
@@ -582,11 +713,13 @@ def start_conjugation_game():
 
 
 @app.route("/end_conjugation_game", methods=["POST"])
+@login_required
 def end_conjugation_game():
     if not request.is_json:
         return jsonify({"error": "Invalid JSON format"}), 400
 
     data = request.get_json()
+    user_id=session.get("user_id")
     results = data.get("results")  # List of attempts
     time_limit = data.get("time_limit")  # in seconds
     mode = data.get("mode")  # "regular","irregular","both"
@@ -620,13 +753,14 @@ def end_conjugation_game():
               groups,
               pronominal_mode,
               total_attempts,
-              correct_answers
+              correct_answers,
+              user_id
             )
             VALUES (
               NOW(),
               %s, %s, %s, %s,
               %s, %s, %s,
-              %s, %s
+              %s, %s, %s
             );
         """, (
             time_limit,
@@ -637,7 +771,8 @@ def end_conjugation_game():
             groups,            # INT[]
             pronominal_mode,   # TEXT
             total_attempts,
-            correct_answers
+            correct_answers, 
+            user_id
         ))
 
         # Update each attempt in "conjugation_tracking"
@@ -650,15 +785,15 @@ def end_conjugation_game():
                 UPDATE conjugation_tracking
                 SET last_accessed = NOW(),
                     total_attempts = total_attempts + 1
-                WHERE id = %s;
-            """, (conj_id,))
+                WHERE id = %s AND user_id = %s;
+            """, (conj_id, user_id))
 
             if not correct:
                 cur.execute("""
                     UPDATE conjugation_tracking
                     SET mistake_timestamps = array_append(mistake_timestamps, NOW())
-                    WHERE id = %s;
-                """, (conj_id,))
+                    WHERE id = %s AND user_id = %s;
+                """, (conj_id, user_id))
 
             # re-calc score
             cur.execute("""
@@ -668,8 +803,8 @@ def end_conjugation_game():
                         EXTRACT(EPOCH FROM (NOW() - last_accessed)) / 3600,
                     3
                 )
-                WHERE id = %s;
-            """, (conj_id,))
+                WHERE id = %s AND user_id = %s;
+            """, (conj_id, user_id))
 
         conn.commit()
         cur.close()
@@ -683,94 +818,93 @@ def end_conjugation_game():
 
 
 @app.route("/stats", methods=["GET"])
+@login_required
 def get_stats():
-    """
-    Returns statistics for a given date range.
-    Query Parameter:
-      - range: "all", "week", or "month"
-    
-    The JSON response contains:
-      - overallStats: overview counts and computed average accuracy and most frequent format
-      - cumulativeGrowth: cumulative totals (words and conjugations) by day
-      - gradedWordRuns: array of graded word game runs (with run_date and accuracy)
-      - gradedConjRuns: array of graded conjugation game runs (with run_date and accuracy)
-      - ungradedWordRuns: array of ungraded word game runs (with run_date, score, time_limit, ratio)
-      - ungradedConjRuns: array of ungraded conjugation game runs (with run_date, score, time_limit, ratio)
-      - bestWords / worstWords: arrays from word_tracking with computed accuracy
-      - bestConjugations / worstConjugations: arrays from conjugation_tracking with computed accuracy
-    """
     try:
         time_range = request.args.get("range", "all")
+
+        # Define base time filters.
         if time_range == "week":
-            vocab_filter = "WHERE created_at >= NOW() - INTERVAL '7 days'"
-            conj_filter = "WHERE created_at >= NOW() - INTERVAL '7 days'"
-            game_filter = "WHERE timestamp >= NOW() - INTERVAL '7 days'"
-            conj_game_filter = "WHERE end_time >= NOW() - INTERVAL '7 days'"
-            tracking_filter = "WHERE last_accessed >= NOW() - INTERVAL '7 days'"
+            base_time = ">= NOW() - INTERVAL '7 days'"
         elif time_range == "month":
-            vocab_filter = "WHERE created_at >= NOW() - INTERVAL '30 days'"
-            conj_filter = "WHERE created_at >= NOW() - INTERVAL '30 days'"
-            game_filter = "WHERE timestamp >= NOW() - INTERVAL '30 days'"
-            conj_game_filter = "WHERE end_time >= NOW() - INTERVAL '30 days'"
-            tracking_filter = "WHERE last_accessed >= NOW() - INTERVAL '30 days'"
+            base_time = ">= NOW() - INTERVAL '30 days'"
         else:
-            vocab_filter = ""
-            conj_filter = ""
-            game_filter = ""
-            conj_game_filter = ""
-            tracking_filter = ""
+            base_time = None
 
-        # For graded/ungraded queries we need to add an extra condition.
-        if game_filter.strip() == "":
-            graded_game_filter = "WHERE ungraded = FALSE"
-            ungraded_game_filter = "WHERE ungraded = TRUE"
-        else:
-            graded_game_filter = game_filter + " AND ungraded = FALSE"
-            ungraded_game_filter = game_filter + " AND ungraded = TRUE"
+        # Helper lists of conditions for each section.
+        user_condition = "user_id = %s"
 
-        if conj_game_filter.strip() == "":
-            graded_conj_game_filter = "WHERE ungraded = FALSE"
-            ungraded_conj_game_filter = "WHERE ungraded = TRUE"
-        else:
-            graded_conj_game_filter = conj_game_filter + " AND ungraded = FALSE"
-            ungraded_conj_game_filter = conj_game_filter + " AND ungraded = TRUE"
+        # For vocabulary, conjugations, game_runs, conjugation_game_runs, and tracking.
+        vocab_conditions = []
+        conj_conditions = []
+        game_conditions = []         # For game_runs table.
+        conj_game_conditions = []    # For conjugation_game_runs table.
+        tracking_conditions = []     # For word_tracking and conjugation_tracking.
 
-        if tracking_filter.strip() == "":
-            word_tracking_filter = "WHERE total_attempts > 0"
-            conj_tracking_filter = "WHERE total_attempts > 0"
-        else:
-            word_tracking_filter = tracking_filter + " AND total_attempts > 0"
-            conj_tracking_filter = tracking_filter + " AND total_attempts > 0"
+        if base_time:
+            vocab_conditions.append("created_at " + base_time)
+            conj_conditions.append("created_at " + base_time)
+            game_conditions.append("timestamp " + base_time)
+            conj_game_conditions.append("end_time " + base_time)
+            tracking_conditions.append("last_accessed " + base_time)
+
+        # Always add the user condition.
+        vocab_conditions.append(user_condition)
+        conj_conditions.append(user_condition)
+        game_conditions.append(user_condition)
+        conj_game_conditions.append(user_condition)
+        tracking_conditions.append(user_condition)
+
+        # Build WHERE clauses.
+        vocab_clause = build_where_clause(vocab_conditions)
+        conj_clause = build_where_clause(conj_conditions)
+        game_clause = build_where_clause(game_conditions)
+        conj_game_clause = build_where_clause(conj_game_conditions)
+        tracking_clause = build_where_clause(tracking_conditions)
+
+        # Now, for graded/ungraded queries add the extra "ungraded" condition.
+        # For game_runs:
+        graded_game_clause = build_where_clause(game_conditions + ["ungraded = FALSE"])
+        ungraded_game_clause = build_where_clause(game_conditions + ["ungraded = TRUE"])
+        # For conjugation_game_runs:
+        graded_conj_game_clause = build_where_clause(conj_game_conditions + ["ungraded = FALSE"])
+        ungraded_conj_game_clause = build_where_clause(conj_game_conditions + ["ungraded = TRUE"])
+        # For tracking, filter for total_attempts > 0:
+        word_tracking_clause = build_where_clause(tracking_conditions + ["total_attempts > 0"])
+        conj_tracking_clause = build_where_clause(tracking_conditions + ["total_attempts > 0"])
 
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
+        user_id = session.get("user_id")
+
+        params = (user_id,)
 
         # --- OVERVIEW STATS ---
-        cur.execute(f"SELECT COUNT(*) AS words_added FROM vocabulary {vocab_filter};")
+        cur.execute(f"SELECT COUNT(*) AS words_added FROM vocabulary {vocab_clause};", params)
         words_added = cur.fetchone()["words_added"]
 
-        cur.execute(f"SELECT COUNT(*) AS conj_added FROM conjugations {conj_filter};")
+        cur.execute(f"SELECT COUNT(*) AS conj_added FROM conjugations {conj_clause};", params)
         conj_added = cur.fetchone()["conj_added"]
 
-        cur.execute(f"SELECT COUNT(*) AS word_games_played FROM game_runs {game_filter};")
+        cur.execute(f"SELECT COUNT(*) AS word_games_played FROM game_runs {game_clause};", params)
         word_games_played = cur.fetchone()["word_games_played"]
 
-        cur.execute(f"SELECT COUNT(*) AS conj_games_played FROM conjugation_game_runs {conj_game_filter};")
+        cur.execute(f"SELECT COUNT(*) AS conj_games_played FROM conjugation_game_runs {conj_game_clause};", params)
         conj_games_played = cur.fetchone()["conj_games_played"]
 
-        # Accuracy calculations for graded attempts
+        # Accuracy calculations for graded attempts.
         cur.execute(f"""
             SELECT COALESCE(SUM(correct_words),0) AS word_correct,
                    COALESCE(SUM(total_words_attempted),0) AS word_attempts
-            FROM game_runs {graded_game_filter};
-        """)
+            FROM game_runs {graded_game_clause};
+        """, params)
         word_stats = cur.fetchone()
 
         cur.execute(f"""
             SELECT COALESCE(SUM(correct_answers),0) AS conj_correct,
                    COALESCE(SUM(total_attempts),0) AS conj_attempts
-            FROM conjugation_game_runs {graded_conj_game_filter};
-        """)
+            FROM conjugation_game_runs {graded_conj_game_clause};
+        """, params)
         conj_stats = cur.fetchone()
 
         total_attempts = word_stats["word_attempts"] + conj_stats["conj_attempts"]
@@ -780,18 +914,20 @@ def get_stats():
         # Most frequent format played
         cur.execute(f"""
             SELECT CONCAT('Vocabulary (', game_type, '), ', (time_limit * 60), 's, ',
-                          CASE WHEN zen_mode THEN 'Zen' ELSE 'Non-Zen' END) AS format, COUNT(*) AS cnt
-            FROM game_runs {game_filter}
+                          CASE WHEN zen_mode THEN 'Zen' ELSE 'Non-Zen' END) AS format,
+                          COUNT(*) AS cnt
+            FROM game_runs {game_clause}
             GROUP BY format;
-        """)
+        """, params)
         word_formats = cur.fetchall()
 
         cur.execute(f"""
             SELECT CONCAT('Conjugation, ', time_limit, 's, ',
-                          CASE WHEN zen_mode THEN 'Zen' ELSE 'Non-Zen' END) AS format, COUNT(*) AS cnt
-            FROM conjugation_game_runs {conj_game_filter}
+                          CASE WHEN zen_mode THEN 'Zen' ELSE 'Non-Zen' END) AS format,
+                          COUNT(*) AS cnt
+            FROM conjugation_game_runs {conj_game_clause}
             GROUP BY format;
-        """)
+        """, params)
         conj_formats = cur.fetchall()
 
         all_formats = word_formats + conj_formats
@@ -812,18 +948,18 @@ def get_stats():
         # --- CUMULATIVE GROWTH DATA ---
         cur.execute(f"""
             SELECT date_trunc('day', created_at) AS day, COUNT(*) AS count
-            FROM vocabulary {vocab_filter}
+            FROM vocabulary {vocab_clause}
             GROUP BY day
             ORDER BY day;
-        """)
+        """, params)
         word_daily = cur.fetchall()
 
         cur.execute(f"""
             SELECT date_trunc('day', created_at) AS day, COUNT(*) AS count
-            FROM conjugations {conj_filter}
+            FROM conjugations {conj_clause}
             GROUP BY day
             ORDER BY day;
-        """)
+        """, params)
         conj_daily = cur.fetchall()
 
         cumulative = {}
@@ -850,15 +986,14 @@ def get_stats():
             })
 
         # --- RUN DATA FOR GRAPHS ---
-        # Use CASE in SQL to avoid division by zero.
         cur.execute(f"""
             SELECT timestamp AS run_date,
                    CASE WHEN total_words_attempted = 0 THEN 0
                         ELSE (correct_words::float/total_words_attempted*100)
                    END AS accuracy
-            FROM game_runs {graded_game_filter}
+            FROM game_runs {graded_game_clause}
             ORDER BY timestamp;
-        """)
+        """, params)
         graded_word_runs = cur.fetchall()
 
         cur.execute(f"""
@@ -866,38 +1001,38 @@ def get_stats():
                    CASE WHEN total_attempts = 0 THEN 0
                         ELSE (correct_answers::float/total_attempts*100)
                    END AS accuracy
-            FROM conjugation_game_runs {graded_conj_game_filter}
+            FROM conjugation_game_runs {graded_conj_game_clause}
             ORDER BY end_time;
-        """)
+        """, params)
         graded_conj_runs = cur.fetchall()
 
         cur.execute(f"""
             SELECT timestamp AS run_date, correct_words AS score, time_limit,
                    (correct_words::float/(time_limit * 60)) AS ratio
-            FROM game_runs {ungraded_game_filter}
+            FROM game_runs {ungraded_game_clause}
             ORDER BY timestamp;
-        """)
+        """, params)
         ungraded_word_runs = cur.fetchall()
 
         cur.execute(f"""
             SELECT end_time AS run_date, correct_answers AS score, time_limit,
                    (correct_answers::float/time_limit) AS ratio
-            FROM conjugation_game_runs {ungraded_conj_game_filter}
+            FROM conjugation_game_runs {ungraded_conj_game_clause}
             ORDER BY end_time;
-        """)
+        """, params)
         ungraded_conj_runs = cur.fetchall()
 
         # --- BEST/WORST WORDS ---
         cur.execute(f"""
             SELECT word, total_attempts,
                    COALESCE(array_length(mistake_timestamps, 1), 0) AS mistakes
-            FROM word_tracking {word_tracking_filter};
-        """)
+            FROM word_tracking {word_tracking_clause};
+        """, params)
         word_stats_rows = cur.fetchall()
         for row in word_stats_rows:
             attempts = row["total_attempts"]
             mistakes = row["mistakes"]
-            row["accuracy"] = ( (attempts - mistakes) / attempts * 100 ) if attempts > 0 else 0
+            row["accuracy"] = ((attempts - mistakes) / attempts * 100) if attempts > 0 else 0
         best_words = sorted(word_stats_rows, key=lambda r: (r["accuracy"], r["total_attempts"]), reverse=True)[:5]
         worst_words = sorted(word_stats_rows, key=lambda r: (r["mistakes"], r["total_attempts"]), reverse=True)[:5]
 
@@ -905,13 +1040,13 @@ def get_stats():
         cur.execute(f"""
             SELECT verb, total_attempts,
                    COALESCE(array_length(mistake_timestamps, 1), 0) AS mistakes
-            FROM conjugation_tracking {conj_tracking_filter};
-        """)
+            FROM conjugation_tracking {conj_tracking_clause};
+        """, params)
         conj_stats_rows = cur.fetchall()
         for row in conj_stats_rows:
             attempts = row["total_attempts"]
             mistakes = row["mistakes"]
-            row["accuracy"] = ( (attempts - mistakes) / attempts * 100 ) if attempts > 0 else 0
+            row["accuracy"] = ((attempts - mistakes) / attempts * 100) if attempts > 0 else 0
         best_conjs = sorted(conj_stats_rows, key=lambda r: (r["accuracy"], r["total_attempts"]), reverse=True)[:5]
         worst_conjs = sorted(conj_stats_rows, key=lambda r: (r["mistakes"], r["total_attempts"]), reverse=True)[:5]
 
