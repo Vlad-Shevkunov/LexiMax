@@ -14,11 +14,17 @@ load_dotenv()  # This loads the variables from .env
 
 app = Flask(__name__)
 # ✅ Important: specify the exact origin and enable credentials
-CORS(
-    app,
-    resources={r"/*": {"origins": os.environ.get("CORS_ORIGIN")}},
-    supports_credentials=True
-)
+raw = os.environ.get("CORS_ORIGIN", "")
+# split into a list (empty list if not set)
+origins = [u.strip() for u in raw.split(",") if u.strip()]
+
+# if you really want to allow everything as a fallback:
+if not origins:
+    origins = ["*"]
+
+CORS(app,
+     resources={r"/*": {"origins": origins}},
+     supports_credentials=True)
 
 app.config['SESSION_COOKIE_SAMESITE'] = 'None'
 app.config['SESSION_COOKIE_SECURE'] = True  # Set True if you serve over HTTPS
@@ -44,6 +50,11 @@ def login_required(f):
             return jsonify({"error": "Unauthorized, please log in."}), 401
         return f(*args, **kwargs)
     return decorated_function
+
+@app.route("/", methods=["GET"])
+def health_check():
+    return jsonify({"status":"ok"}), 200
+
 
 @app.route('/current_user', methods=["GET"])
 @login_required
