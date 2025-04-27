@@ -6,13 +6,14 @@ function Navbar() {
   const location = useLocation();
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "error";
 
   // For demonstration, we assume the server sends the session cookie
   // and that on page load you might have an endpoint to get the current user.
   // If you don't, you can also store the username on a global state when logging in.
   useEffect(() => {
     // Example: try to get user info from a session endpoint.
-    axios.get("http://127.0.0.1:5000/current_user", { withCredentials: true })
+    axios.get(`${API_BASE_URL}/current_user`, { withCredentials: true })
       .then(res => {
         if (res.data && res.data.username) {
           setUsername(res.data.username);
