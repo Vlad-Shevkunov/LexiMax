@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const API_BASE_URL = "http://127.0.0.1:5000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:5000";
 axios.defaults.withCredentials = true;
 
 export const registerUser = async (username, password) => {
@@ -132,7 +132,7 @@ export const getWords = async () => {
     ungraded // new boolean
   ) => {
     try {
-      const response = await axios.post("http://127.0.0.1:5000/end_game", {
+      const response = await axios.post(`${API_BASE_URL}/end_game`, {
         time_limit: timeLimit,
         game_type: gameType,
         zen_mode: zenMode,
@@ -211,7 +211,7 @@ export const startConjugationGameAPI = async (
   pronominalMode        // "only", "exclude", "both"
 ) => {
   try {
-    const response = await axios.post("http://127.0.0.1:5000/start_conjugation_game", {
+    const response = await axios.post(`${API_BASE_URL}/start_conjugation_game`, {
       time_limit: timeLimit,
       mode: mode,  // "regular", "irregular", or "both"
       tenses: selectedTenses, 
@@ -244,7 +244,7 @@ export const endConjugationGameAPI = async (
   score
 ) => {
   try {
-    const response = await axios.post("http://127.0.0.1:5000/end_conjugation_game", {
+    const response = await axios.post(`${API_BASE_URL}/end_conjugation_game`, {
       time_limit: timeLimit,        // in seconds
       mode: mode,                   // "regular"/"irregular"/"both"
       zen_mode: zenMode,
