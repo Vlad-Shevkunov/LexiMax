@@ -89,7 +89,7 @@ export default function Navbar() {
             name="vocab"
             label="Vocabulary"
             items={[
-              { to: "/", label: "Add Word" },
+              { to: "/add-word", label: "Add Word" },
               { to: "/words", label: "Word List" },
               { to: "/game", label: "Word Game" },
             ]}
