@@ -397,7 +397,7 @@ def end_game():
         cur.execute("""
             INSERT INTO game_runs 
               (time_limit, game_type, zen_mode, total_words_attempted, correct_words, ungraded, user_id)
-            VALUES (%s, %s, %s, %s, %s, %s);
+            VALUES (%s, %s, %s, %s, %s, %s, %s);
         """, (time_limit, game_type, zen_mode, total_attempts, score, ungraded, user_id))
 
         # For each word attempt, update word_tracking
@@ -626,6 +626,7 @@ def start_conjugation_game():
         tenses = data.get("tenses", [])   # array of strings
         groups = data.get("groups", [])   # array of ints
         pronominal_mode = data.get("pronominal_mode", "both")  # "only", "exclude", "both"
+        params = {"user_id": user_id}
 
         conn = get_db_connection()
         cur = conn.cursor()
@@ -668,7 +669,6 @@ def start_conjugation_game():
         # 2) Build WHERE clauses
         where_clauses = []
         where_clauses.append("c.user_id = %(user_id)s")
-        params = {}
 
         # (a) Filter by "mode" => irregular
         if mode == "regular":
