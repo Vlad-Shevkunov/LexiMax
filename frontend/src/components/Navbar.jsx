@@ -1,197 +1,167 @@
-import { Link, useLocation, useNavigate} from "react-router-dom";
-import { useEffect, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useState, useRef } from "react";
 import axios from "axios";
-import { logoutUser } from "../services/api"; // adjust the import as needed
-function Navbar() {
+import { logoutUser } from "../services/api";
+
+export default function Navbar() {
   const location = useLocation();
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "error";
+  const [openMenu, setOpenMenu] = useState(null);
+  const navRef = useRef(null);
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
-  // For demonstration, we assume the server sends the session cookie
-  // and that on page load you might have an endpoint to get the current user.
-  // If you don't, you can also store the username on a global state when logging in.
   useEffect(() => {
-    // Example: try to get user info from a session endpoint.
-    axios.get(`${API_BASE_URL}/current_user`, { withCredentials: true })
-      .then(res => {
-        if (res.data && res.data.username) {
-          setUsername(res.data.username);
-        }
-      })
-      .catch(err => console.error("Error fetching current user:", err));
+    axios
+      .get(`${API_BASE_URL}/current_user`, { withCredentials: true })
+      .then((res) => setUsername(res.data.username || ""))
+      .catch(() => setUsername(""));
   }, [location]);
 
-  const handleLogout = async () => {
-    try {
-      await logoutUser(); // call the API to log out
-      setUsername("");   // clear our local username state
-      navigate("/login"); // redirect the user to the login page
-    } catch (err) {
-      console.error("Logout failed:", err);
+  useEffect(() => {
+    function onClick(e) {
+      // if click is *outside* the <nav>, close any open dropdown:
+      if (navRef.current && !navRef.current.contains(e.target)) {
+        setOpenMenu(null);
+      }
     }
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
+  }, []);
+
+  const isActive = (path) => location.pathname === path;
+  const handleLogout = async () => {
+    await logoutUser();
+    setUsername("");
+    navigate("/login");
   };
+
+  const MenuItem = ({ to, label }) => (
+    <Link
+      to={to}
+      className={`
+        block px-4 py-2 whitespace-nowrap hover:bg-gray-700
+        ${isActive(to) ? "bg-gray-700" : ""}
+      `}
+      onClick={() => setOpenMenu(null)}
+    >
+      {label}
+    </Link>
+  );
+
+  const Dropdown = ({ name, label, items }) => (
+    <div className="relative">
+      <button
+        onClick={(e) => {
+          e.stopPropagation();            // <-- prevent document-click
+          setOpenMenu(openMenu === name ? null : name);
+        }}
+        className={`flex items-center gap-1 rounded bg-gray-800 px-3 py-2 hover:bg-gray-700 transition 
+          ${openMenu === name ? "bg-gray-700" : ""}`}
+      >
+        {label} ▾
+      </button>
+
+      {openMenu === name && (
+        <ul className="absolute left-0 mt-1 w-44 rounded bg-gray-800 shadow-lg z-20">
+          {items.map((i) => (
+            <MenuItem key={i.to} to={i.to} label={i.label} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 
   return (
     <nav
-      className="
-        fixed top-0 w-full z-50
-        bg-gradient-to-r from-gray-900 via-gray-800 to-black
-        text-white p-4 shadow-lg
-      "
+      ref={navRef}
+      className="fixed inset-x-0 top-0 z-50 bg-gray-900 text-white shadow"
     >
-      <ul className="flex justify-center items-center space-x-6 text-sm md:text-base">
-        <li>
-          <Link
-            to="/login"
-            className={`
-              px-4 py-2 rounded-md transition-colors duration-150 
-              ${
-                location.pathname === "/login"
-                  ? "bg-gray-700"
-                  : "hover:bg-gray-800"
-              }
-            `}
-          >
-            Login
-          </Link>
-        </li>
-        <li>
-          <Link
-            to="/register"
-            className={`
-              px-4 py-2 rounded-md transition-colors duration-150 
-              ${
-                location.pathname === "/register"
-                  ? "bg-gray-700"
-                  : "hover:bg-gray-800"
-              }
-            `}
-          >
-            Register
-          </Link>
-        </li>
-        <li>
-          <Link
-            to="/"
-            className={`
-              px-4 py-2 rounded-md transition-colors duration-150 
-              ${
-                location.pathname === "/"
-                  ? "bg-gray-700"
-                  : "hover:bg-gray-800"
-              }
-            `}
-          >
-            Add Word
-          </Link>
-        </li>
-        <li>
-          <Link
-            to="/words"
-            className={`
-              px-4 py-2 rounded-md transition-colors duration-150 
-              ${
-                location.pathname === "/words"
-                  ? "bg-gray-700"
-                  : "hover:bg-gray-800"
-              }
-            `}
-          >
-            Word List
-          </Link>
-        </li>
-        <li>
-          <Link
-            to="/game"
-            className={`
-              px-4 py-2 rounded-md transition-colors duration-150
-              ${
-                location.pathname === "/game"
-                  ? "bg-gray-700"
-                  : "hover:bg-gray-800"
-              }
-            `}
-          >
-            Word Game
-          </Link>
-        </li>
-        <li>
-          <Link
-            to="/add-conjugation"
-            className={`
-              px-4 py-2 rounded-md transition-colors duration-150
-              ${
-                location.pathname === "/add-conjugation"
-                  ? "bg-gray-700"
-                  : "hover:bg-gray-800"
-              }
-            `}
-          >
-            Add Conjugation
-          </Link>
-        </li>
-        <li>
-          <Link
-            to="/conjugation-list"
-            className={`
-              px-4 py-2 rounded-md transition-colors duration-150
-              ${
-                location.pathname === "/conjugation-list"
-                  ? "bg-gray-700"
-                  : "hover:bg-gray-800"
-              }
-            `}
-          >
-            Conjugation List
-          </Link>
-        </li>
-        <li>
-          <Link
-            to="/conjugation-game"
-            className={`
-              px-4 py-2 rounded-md transition-colors duration-150
-              ${
-                location.pathname === "/conjugation-game"
-                  ? "bg-gray-700"
-                  : "hover:bg-gray-800"
-              }
-            `}
-          >
-            Conjugation Game
-          </Link>
-        </li>
-        <li>
-          <Link
-            to="/stats"
-            className={`
-              px-4 py-2 rounded-md transition-colors duration-150
-              ${
-                location.pathname === "/stats"
-                  ? "bg-gray-700"
-                  : "hover:bg-gray-800"
-              }
-            `}
-          >
-            Stats
-          </Link>
-        </li> 
-      </ul>
-      {username && (
-        <div className="absolute right-4 top-4 text-sm flex items-center space-x-2">
-          <span>
-            Signed in as <strong>{username}</strong>
-          </span>
-          <button
-            onClick={handleLogout}
-            className="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-white transition-colors duration-150"
-          >
-            Logout
-          </button>
+      <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
+        {/* Brand */}
+        <Link to="/" className="text-lg font-bold hover:text-gray-300 transition">
+          LexiMax
+        </Link>
+
+        {/* Main menu */}
+        <div className="flex items-center space-x-6">
+          <Dropdown
+            name="vocab"
+            label="Vocabulary"
+            items={[
+              { to: "/", label: "Add Word" },
+              { to: "/words", label: "Word List" },
+              { to: "/game", label: "Word Game" },
+            ]}
+          />
+          <Dropdown
+            name="conj"
+            label="Conjugation"
+            items={[
+              { to: "/add-conjugation", label: "Add Conjugation" },
+              { to: "/conjugation-list", label: "Conjugation List" },
+              { to: "/conjugation-game", label: "Conjugation Game" },
+            ]}
+          />
+          <Dropdown
+            name="stats"
+            label="Configuration"
+            items={[
+              { to: "/stats", label: "Stats" },
+              { to: "/settings", label: "Settings" },
+            ]}
+          />
         </div>
-      )}
+
+        {/* Auth / user */}
+        <div className="flex items-center space-x-4">
+          {!username ? (
+            <>
+              <Link
+                to="/login"
+                className={`rounded bg-gray-800 px-3 py-2 hover:bg-gray-700 transition ${
+                  isActive("/login") ? "bg-gray-700" : ""
+                }`}
+              >
+                Login
+              </Link>
+              <Link
+                to="/register"
+                className={`rounded bg-gray-800 px-3 py-2 hover:bg-gray-700 transition ${
+                  isActive("/register") ? "bg-gray-700" : ""
+                }`}
+              >
+                Register
+              </Link>
+            </>
+          ) : (
+            <div className="relative">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();  
+                  setOpenMenu(openMenu === "user" ? null : "user");
+                }}
+                className={`flex items-center gap-1 rounded bg-gray-800 px-3 py-2 hover:bg-gray-700 transition 
+                  ${openMenu === "user" ? "bg-gray-700" : ""}`}
+              >
+                Signed in as <strong>{username}</strong> ▾
+              </button>
+              {openMenu === "user" && (
+                <ul className="absolute right-0 mt-1 w-32 rounded bg-gray-800 shadow-lg z-20">
+                  <li>
+                    <button
+                      onClick={handleLogout}
+                      className="w-full text-left px-4 py-2 hover:bg-gray-700"
+                    >
+                      Logout
+                    </button>
+                  </li>
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </nav>
   );
 }
-
-export default Navbar;
