@@ -33,15 +33,23 @@ export const logoutUser = async () => {
   }
 };
 
+export const getSettings = () =>
+  axios.get(`${API_BASE_URL}/settings`, { withCredentials: true })
+       .then(r => r.data);
 
-export const addWord = async (word, translation, partOfSpeech, article) => {
-    console.log("Sending data:", { word, translation, partOfSpeech, article }); // Log the data before sending  
+export const saveSettings = (settings) =>
+  axios.put(`${API_BASE_URL}/settings`, settings, { withCredentials: true });
+
+
+export const addWord = async (word, translation, partOfSpeech, article, word_class) => {
+    console.log("Sending data:", { word, translation, partOfSpeech, article, word_class}); // Log the data before sending  
   try {
     const response = await axios.post(`${API_BASE_URL}/add_word`, {
       word,
       translation,
       part_of_speech: partOfSpeech,
       article,
+      word_class,
     });
     return response.data;
   } catch (error) {
@@ -60,13 +68,14 @@ export const getWords = async () => {
     }
   };
   
-  export const updateWord = async (wordId, word, translation, partOfSpeech, article) => {
+  export const updateWord = async (wordId, word, translation, partOfSpeech, article, word_class) => {
     try {
       const response = await axios.put(`${API_BASE_URL}/update_word/${wordId}`, {
         word,
         translation,
         part_of_speech: partOfSpeech,
         article,
+        word_class,
       });
       return response.data;
     } catch (error) {
@@ -85,34 +94,11 @@ export const getWords = async () => {
       throw error;
     }
   };
-
-  export const getWord = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/get_word`);
-      return response.data;
-    } catch (error) {
-      console.error("Error fetching word:", error);
-      throw error;
-    }
-  };
   
-  export const updateWordUsage = async (wordId, correct) => {
-    try {
-      const response = await axios.post(`${API_BASE_URL}/update_word_usage`, {
-        word_id: wordId,
-        correct: correct ? true : false,
-      });
-      return response.data;
-    } catch (error) {
-      console.error("Error updating word usage:", error.response ? error.response.data : error);
-      throw error;
-    }
-  };
-  
-  export const startGameAPI = async (timeLimit) => {
+  export const startGameAPI = async (timeLimit, selected, parts_of_speech) => {
     try {
       const response = await axios.post(`${API_BASE_URL}/start_game`, {
-        time_limit: timeLimit, // Only send time_limit now
+        time_limit: timeLimit, classes: selected, parts_of_speech
       });
       return response.data;
     } catch (error) {
@@ -129,7 +115,9 @@ export const getWords = async () => {
     finalResults,
     finalAttempts,
     finalScore,
-    ungraded // new boolean
+    ungraded, 
+    classes = [], 
+    parts_of_speech = []
   ) => {
     try {
       const response = await axios.post(`${API_BASE_URL}/end_game`, {
@@ -139,7 +127,9 @@ export const getWords = async () => {
         results: finalResults,
         total_attempts: finalAttempts,
         score: finalScore,
-        ungraded: ungraded // pass the new field
+        ungraded: ungraded, 
+        classes, 
+        parts_of_speech
       });
       return response.data;
     } catch (error) {

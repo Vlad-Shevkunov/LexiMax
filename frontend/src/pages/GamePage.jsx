@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { startGameAPI, endGameAPI } from "../services/api";
+import { startGameAPI, endGameAPI, getSettings } from "../services/api";
+import { toast } from "react-toastify";
 
 function GamePage() {
   // --------------------- State for the Word Queue & Current Index
@@ -29,9 +30,19 @@ function GamePage() {
 
   // --------------------- Settings
   const [timeLimit, setTimeLimit] = useState(300);
-  const [gameType, setGameType] = useState("frenchToEnglish"); // "frenchToEnglish","englishToFrench","both"
+  const [gameType, setGameType] = useState(""); // "frenchToEnglish","englishToFrench","both"
   const [ungraded, setUngraded] = useState(false);  // real-time checking
   const [zenMode, setZenMode] = useState(false);
+
+  const [sourceLang, setSourceLang] = useState("");
+  const [targetLang, setTargetLang] = useState("");
+   // new: toggles the advanced‐settings panel
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [classes, setClasses]     = useState([]);      // user's available classes
+  const [selected, setSelected]   = useState([]);      // chosen for this game
+
+  const [parts, setParts]     = useState([]);  
+  const [selectedParts, setSelectedParts]   = useState([]);
 
   // --------------------- Score
   const [correctAnswers, setCorrectAnswers] = useState(0);
@@ -41,6 +52,20 @@ function GamePage() {
   const [finalScore, setFinalScore] = useState(null);
   const [finalAttempts, setFinalAttempts] = useState(null);
   const [finalResults, setFinalResults] = useState(null);
+
+  // fetch user settings on mount
+  useEffect(() => {
+    getSettings().then(s => {
+      setClasses(s.vocab?.classes || []);  
+      const src = s.sourceLang || "English";
+      const trg = s.targetLang || "French"
+      setSourceLang(src);
+      setTargetLang(trg);
+      setGameType(`${trg}To${src}`);
+      setParts(s.vocab?.partsOfSpeech || []);
+      setSelectedParts([]);            
+    });
+  }, []);
 
   // ─────────────────────────────────────────────────────────────────────────
   // 1) Timer Effect for overall game
@@ -67,9 +92,10 @@ function GamePage() {
   // ─────────────────────────────────────────────────────────────────────────
   const handleStartGame = async () => {
     try {
-      const response = await startGameAPI(timeLimit);
+      const response = await startGameAPI(timeLimit, selected, selectedParts);
       if (!response.words || response.words.length === 0) {
         console.warn("No words returned from API!");
+        toast.error("No words matched your filters. Try different settings!"); 
         return;
       }
 
@@ -77,7 +103,7 @@ function GamePage() {
       const wordsWithMode = response.words.map((w) => {
         let mode = gameType;
         if (gameType === "both") {
-          mode = Math.random() < 0.5 ? "frenchToEnglish" : "englishToFrench";
+          mode = Math.random() < 0.5 ? `${sourceLang}To${targetLang}`: `${targetLang}To${sourceLang}`;
         }
         return { ...w, mode };
       });
@@ -120,7 +146,7 @@ function GamePage() {
     let prompt = "";
     let expected = [];
 
-    if (baseItem.mode === "frenchToEnglish") {
+    if (baseItem.mode === `${targetLang}To${sourceLang}`) {
       // The user sees the French => set the French as 'prompt'
       // The user must type an English translation
       prompt = baseItem.word;
@@ -168,7 +194,7 @@ function GamePage() {
     if (!w || gameOver) return;
 
     // If english->french & has article => focus articleRef
-    if (w.mode === "englishToFrench" && w.article !== "none") {
+    if (w.mode === `${sourceLang}To${targetLang}` && w.article !== "none") {
       articleRef.current?.focus();
     } else {
       mainWordRef.current?.focus();
@@ -193,7 +219,7 @@ function GamePage() {
     const spentSeconds = Math.floor((Date.now() - (wordStartTime || Date.now())) / 1000);
 
     let userFullAnswer = "";
-    if (w.mode === "englishToFrench") {
+    if (w.mode === `${sourceLang}To${targetLang}`) {
       if (w.article === "none") {
         userFullAnswer = mainWordInput.trim().toLowerCase();
       } else {
@@ -247,7 +273,7 @@ function GamePage() {
     if (!w) return;
 
     let userFullAnswer = "";
-    if (w.mode === "englishToFrench") {
+    if (w.mode === `${sourceLang}To${targetLang}`) {
       if (w.article === "none") {
         userFullAnswer = mainWordInput.trim().toLowerCase();
       } else {
@@ -316,9 +342,9 @@ function GamePage() {
   // endGameAPI call
   useEffect(() => {
     if (gameOver && finalScore !== null && finalAttempts !== null && finalResults !== null) {
-      endGameAPI(timeLimit, gameType, zenMode, finalResults, finalAttempts, finalScore, ungraded);
+      endGameAPI(timeLimit, gameType, zenMode, finalResults, finalAttempts, finalScore, ungraded, selected, selectedParts);
     }
-  }, [gameOver, finalScore, finalAttempts, finalResults, timeLimit, gameType, zenMode, ungraded]);
+  }, [gameOver, finalScore, finalAttempts, finalResults, timeLimit, gameType, zenMode, ungraded, selected, selectedParts]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // 8) Summary: Mistakes or Longest Time
@@ -415,12 +441,33 @@ function GamePage() {
             <p className="text-lg">Accuracy: <strong>{accuracy}%</strong></p>
           </div>
 
-          <button
-            className="mt-6 px-6 py-3 bg-blue-500 hover:bg-blue-600 rounded-lg text-white font-semibold text-lg w-full"
-            onClick={handleStartGame}
-          >
-            Play Again
-          </button>
+          <div className="mt-6 flex gap-4">
+            {/* 1) Same settings */}
+            <button
+              className="flex-1 px-5 py-3 bg-blue-500 hover:bg-blue-600 rounded-lg text-white font-semibold"
+              onClick={() => {
+                // reset only game state—but keep settings in place:
+                handleStartGame();
+              }}
+            >
+              ▶️ Play Again With Same Settings
+            </button>
+
+            {/* 2) Different settings */}
+            <button
+              className="flex-1 px-5 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-semibold"
+              onClick={() => {
+                // drop back to settings screen:
+                setStartTime(null);
+                setShowSummary(false);
+                // optionally clear any queue/results if you want fresh
+                setWordQueue([]);
+                setCurrentIndex(0);
+              }}
+            >
+              ⚙️ Play With Different Settings
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -435,7 +482,7 @@ function GamePage() {
 
           {/* Time Limit */}
           <label className="block text-left mb-4">
-            <span className="font-medium block mb-1">Time Limit (Seconds):</span>
+            <span className="font-medium block mb-1">Time Limit (Minutes):</span>
             <select
               className="p-2 rounded bg-gray-700 w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={timeLimit}
@@ -454,9 +501,13 @@ function GamePage() {
               value={gameType}
               onChange={(e) => setGameType(e.target.value)}
             >
-              <option value="frenchToEnglish">French → English</option>
-              <option value="englishToFrench">English → French</option>
-              <option value="both">Both</option>
+            <option value={`${sourceLang}To${targetLang}`}>
+              {sourceLang.toUpperCase()} → {targetLang.toUpperCase()}
+            </option>
+            <option value={`${targetLang}To${sourceLang}`}>
+              {targetLang.toUpperCase()} → {sourceLang.toUpperCase()}
+            </option>
+            <option value="both">Both</option>
             </select>
           </label>
 
@@ -481,7 +532,65 @@ function GamePage() {
             />
             <span className="font-medium">Zen Mode (Hide Timer &amp; Score)</span>
           </label>
-
+          {classes.length>0 && (
+            <div className="mb-6">
+              <button
+                onClick={() => setShowAdvanced((v) => !v)}
+                className="w-full text-left mb-4 px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded transition"
+              >
+                Advanced Settings {showAdvanced ? "▾" : "▸"}
+              </button>
+            
+              {showAdvanced && (
+                <div className="mb-6 p-4 bg-gray-800 rounded space-y-3">
+                  <p className="font-medium">Filter by Classes:</p>
+                  <div className="grid grid-cols-2 gap-2 max-h-40 overflow-auto">
+                    {classes.map((cls) => (
+                      <label key={cls} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(cls)}
+                          onChange={() => {
+                            setSelected((prev) =>
+                              prev.includes(cls)
+                                ? prev.filter((c) => c !== cls)
+                                : [...prev, cls]
+                            );
+                          }}
+                          className="h-4 w-4 text-blue-500"
+                        />
+                        <span>{cls}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {showAdvanced && (
+                <div className="mb-6 p-4 bg-gray-800 rounded space-y-3">
+                  <p className="font-medium">Filter by Parts of Speech:</p>
+                  <div className="grid grid-cols-2 gap-2 max-h-40 overflow-auto">
+                    {parts.map((p) => (
+                      <label key={p} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedParts.includes(p)}
+                          onChange={() => {
+                            setSelectedParts((prev) =>
+                              prev.includes(p)
+                                ? prev.filter((x) => x !== p)
+                                : [...prev, p]
+                            );
+                          }}
+                          className="h-4 w-4 text-blue-500"
+                        />
+                        <span>{p}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <button
             className="w-full px-5 py-3 bg-blue-500 hover:bg-blue-600 rounded-lg text-white font-semibold text-lg transition-colors duration-150"
             onClick={handleStartGame}
@@ -512,7 +621,7 @@ function GamePage() {
 
         <form onSubmit={handleSubmit}>
           {/* If englishToFrench & article != none => side by side */}
-          {currentWord.mode === "englishToFrench" && currentWord.article !== "none" ? (
+          {currentWord.mode === `${sourceLang}To${targetLang}` && currentWord.article !== "none" ? (
             <div className="flex items-center justify-center gap-2 mb-4">
               <input
                 ref={articleRef}
@@ -592,13 +701,19 @@ function GamePage() {
         {!zenMode && (
           <div className="mt-4">
             <p className="text-sm">Time Left: {timeRemaining}s</p>
-            <p className="text-sm">
-              Accuracy:{" "}
-              {totalAttempts > 0
-                ? ((correctAnswers / totalAttempts) * 100).toFixed(2)
-                : 0}
-              %
-            </p>
+            {ungraded ? (
+              <p className="text-sm">
+                Words Completed: {gameResults.length}
+              </p>
+            ) : (
+              <p className="text-sm">
+                Accuracy:{" "}
+                {totalAttempts > 0
+                  ? ((correctAnswers / totalAttempts) * 100).toFixed(2)
+                  : 0}
+                %
+              </p>
+            )}
           </div>
         )}
       </div>

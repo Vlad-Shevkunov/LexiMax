@@ -23,6 +23,7 @@ ChartJS.register(
   Legend
 );
 
+
 function StatsPage() {
   // State variables for stats
   const [overallStats, setOverallStats] = useState(null);
@@ -140,7 +141,7 @@ function StatsPage() {
       </thead>
       <tbody>
         {data.map((item, idx) => {
-          const label = isWord ? item.word : item.verb;
+          const label = isWord ? item.word : `${item.verb} (${item.tense}, ${item.person})`;
           return (
             <tr
               key={idx}

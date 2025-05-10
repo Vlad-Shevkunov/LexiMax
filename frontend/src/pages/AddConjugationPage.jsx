@@ -1,59 +1,97 @@
-import { useState } from "react";
-import { addConjugation } from "../services/api";
+// src/pages/AddConjugationPage.jsx
+import { useState, useEffect } from "react";
+import { getSettings, addConjugation } from "../services/api";
+import { toast } from "react-toastify";
 
-function AddConjugationPage() {
-  /***************************************************************
-   * Configuration: Tenses & Persons
-   ***************************************************************/
-  const persons = ["je", "tu", "il/elle/on", "nous", "vous", "ils/elles"];
-  const allTenses = [
-    "présent",
-    "passé composé",
-    "imparfait",
-    "futur simple",
-    "conditionnel présent",
-    "impératif"
-  ];
+export default function AddConjugationPage() {
+  // ── Loading & settings ───────────────────────────────────────────────
+  const [loading, setLoading] = useState(true);
+  const [persons, setPersons] = useState([]);
+  const [tenses, setTenses] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [allowPronominal, setAllowPronominal] = useState(false);
+  const [allowIrregular, setAllowIrregular] = useState(false);
 
-  /***************************************************************
-   * Full Verb Bulk Entry State & Helper Functions
-   ***************************************************************/
+  // ── Conjugation‐grid state ────────────────────────────────────────────
+  // fullConjugations[tense][person] → { text, irregular }
+  const [fullConjugations, setFullConjugations] = useState({});
+
+  // ── Bulk‐add inputs ────────────────────────────────────────────────────
   const [fullVerb, setFullVerb] = useState("");
   const [fullPronominal, setFullPronominal] = useState(false);
   const [fullVerbGroup, setFullVerbGroup] = useState(0);
 
-  // Build the initial grid state for all tenses and persons.
-  const buildInitialConjugations = () => {
-    const initObj = {};
-    allTenses.forEach((tense) => {
-      initObj[tense] = {};
-      persons.forEach((person) => {
-        initObj[tense][person] = { text: "", irregular: false };
+  // ── Build an empty grid given persons & tenses ────────────────────────
+  const buildInitialConjugations = (ps, ts) => {
+    const init = {};
+    ts.forEach((tense) => {
+      init[tense] = {};
+      ps.forEach((person) => {
+        init[tense][person] = { text: "", irregular: false };
       });
     });
-    return initObj;
+    return init;
   };
 
-  const [fullConjugations, setFullConjugations] = useState(buildInitialConjugations);
+  // ── Load user settings once on-mount ──────────────────────────────────
+  useEffect(() => {
+    getSettings()
+      .then((s) => {
+        const c = s.conj || {};
+        const ps = c.persons || [];
+        const ts = c.tenses || [];
+        const gs = c.groups || [];
 
-  const handleFullConjChange = (tenseKey, personKey, field, value) => {
+        setPersons(ps);
+        setTenses(ts);
+        setGroups(gs);
+        setAllowPronominal(!!c.allowPronominal);
+        setAllowIrregular(!!c.allowIrregular);
+
+        // initialize grid
+        setFullConjugations(buildInitialConjugations(ps, ts));
+      })
+      .catch((err) => {
+        console.error("Failed to load settings:", err);
+        toast.error("Could not load conjugation settings.");
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  // ── Show loading / prompt if no config ───────────────────────────────
+  if (loading) {
+    return <div className="p-6 text-white">Loading settings…</div>;
+  }
+  if (!persons.length || !tenses.length) {
+    return (
+      <div className="p-6 text-white">
+        Please configure your <strong>persons</strong> and <strong>tenses</strong> in
+        Settings before adding conjugations.
+      </div>
+    );
+  }
+
+  // ── Handle editing any one cell ───────────────────────────────────────
+  const handleFullConjChange = (tense, person, field, value) => {
     setFullConjugations((prev) => {
-      const copy = JSON.parse(JSON.stringify(prev));
-      copy[tenseKey][personKey][field] = value;
+      const copy = { ...prev };
+      copy[tense] = { ...copy[tense] };
+      copy[tense][person] = { ...copy[tense][person], [field]: value };
       return copy;
     });
   };
 
+  // ── Bulk‐submit all filled cells ──────────────────────────────────────
   const handleSubmitFull = async () => {
     if (!fullVerb.trim()) {
-      alert("Please specify the base verb (infinitive)!");
+      toast.error("Please specify the base verb (infinitive)!");
       return;
     }
-    const confirmations = [];
-    for (let tense of allTenses) {
+    const results = [];
+    for (let tense of tenses) {
       for (let person of persons) {
         const cell = fullConjugations[tense][person];
-        if (cell.text.trim() !== "") {
+        if (cell.text.trim()) {
           try {
             await addConjugation(
               fullVerb.trim().toLowerCase(),
@@ -62,31 +100,27 @@ function AddConjugationPage() {
               cell.text.trim().toLowerCase(),
               cell.irregular,
               fullPronominal,
-              parseInt(fullVerbGroup)
+              fullVerbGroup
             );
-            confirmations.push(`${person} - ${tense} => OK`);
-          } catch (error) {
-            confirmations.push(`${person} - ${tense} => FAILED: ${error}`);
+            results.push(`${person} – ${tense}: OK`);
+          } catch {
+            results.push(`${person} – ${tense}: FAILED`);
           }
         }
       }
     }
-
-    alert(
-      `Finished adding all conjugations for "${fullVerb}".\n\n` +
-        confirmations.join("\n")
+    toast.success(
+      `Finished adding conjugations for "${fullVerb}".\n\n` +
+        results.join("\n")
     );
-
-    // Reset all fields after submission.
+    // reset
     setFullVerb("");
     setFullPronominal(false);
     setFullVerbGroup(0);
-    setFullConjugations(buildInitialConjugations());
+    setFullConjugations(buildInitialConjugations(persons, tenses));
   };
 
-  /***************************************************************
-   * Render: Full Verb Conjugation Grid
-   ***************************************************************/
+  // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen w-screen bg-gradient-to-r from-gray-900 via-gray-800 to-black text-white">
       <div className="px-8 py-6 flex flex-col space-y-6">
@@ -95,37 +129,45 @@ function AddConjugationPage() {
             Add Full Verb Conjugation
           </h1>
 
-          {/* Verb Details */}
+          {/* Verb + Flags */}
           <div className="flex flex-wrap items-center justify-center gap-4 mb-6">
             <input
               type="text"
-              placeholder="Verb (infinitive), e.g. 'faire'"
+              placeholder="Infinitive (e.g. faire)"
               className="p-3 rounded bg-gray-800 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-white w-64"
               value={fullVerb}
               onChange={(e) => setFullVerb(e.target.value)}
             />
-            <label className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                checked={fullPronominal}
-                onChange={() => setFullPronominal(!fullPronominal)}
-                className="w-4 h-4 text-blue-500"
-              />
-              <span>Pronominal?</span>
-            </label>
-            <label className="flex items-center space-x-2">
-              <span>Group:</span>
-              <select
-                className="p-2 rounded bg-gray-800 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"
-                value={fullVerbGroup}
-                onChange={(e) => setFullVerbGroup(e.target.value)}
-              >
-                <option value={0}>0 - Unknown/No Group</option>
-                <option value={1}>1 -er (First Group)</option>
-                <option value={2}>2 -ir (Second Group)</option>
-                <option value={3}>3 - (Third Group)</option>
-              </select>
-            </label>
+
+            {allowPronominal && (
+              <label className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  checked={fullPronominal}
+                  onChange={() => setFullPronominal(!fullPronominal)}
+                  className="w-4 h-4 text-blue-500"
+                />
+                <span>Pronominal?</span>
+              </label>
+            )}
+
+            {groups.length > 0 && (
+              <label className="flex items-center space-x-2">
+                <span>Group:</span>
+                <select
+                  className="p-2 rounded bg-gray-800 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"
+                  value={fullVerbGroup}
+                  onChange={(e) => setFullVerbGroup(e.target.value)}
+                >
+                  <option value={0}>0 – Unknown/No Group</option>
+                  {groups.map((g) => (
+                    <option key={g} value={g}>
+                      {g}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
 
           {/* Conjugation Grid */}
@@ -134,7 +176,7 @@ function AddConjugationPage() {
               <thead className="bg-gray-800">
                 <tr>
                   <th className="p-2 border border-gray-600">Person / Tense</th>
-                  {allTenses.map((tense) => (
+                  {tenses.map((tense) => (
                     <th key={tense} className="p-2 border border-gray-600">
                       {tense}
                     </th>
@@ -143,9 +185,14 @@ function AddConjugationPage() {
               </thead>
               <tbody>
                 {persons.map((person) => (
-                  <tr key={person} className="bg-gray-700 hover:bg-gray-600 transition-colors">
-                    <td className="p-2 border border-gray-600 font-semibold">{person}</td>
-                    {allTenses.map((tense) => {
+                  <tr
+                    key={person}
+                    className="bg-gray-700 hover:bg-gray-600 transition-colors"
+                  >
+                    <td className="p-2 border border-gray-600 font-semibold">
+                      {person}
+                    </td>
+                    {tenses.map((tense) => {
                       const cell = fullConjugations[tense][person];
                       return (
                         <td key={tense} className="p-2 border border-gray-600">
@@ -155,20 +202,32 @@ function AddConjugationPage() {
                             className="p-2 w-28 rounded bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                             value={cell.text}
                             onChange={(e) =>
-                              handleFullConjChange(tense, person, "text", e.target.value)
+                              handleFullConjChange(
+                                tense,
+                                person,
+                                "text",
+                                e.target.value
+                              )
                             }
                           />
-                          <label className="flex items-center justify-center mt-1 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={cell.irregular}
-                              onChange={(e) =>
-                                handleFullConjChange(tense, person, "irregular", e.target.checked)
-                              }
-                              className="w-4 h-4 text-blue-500 ml-2"
-                            />
-                            <span className="ml-1 text-xs">irreg?</span>
-                          </label>
+                          {allowIrregular && (
+                            <label className="flex items-center justify-center mt-1 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={cell.irregular}
+                                onChange={(e) =>
+                                  handleFullConjChange(
+                                    tense,
+                                    person,
+                                    "irregular",
+                                    e.target.checked
+                                  )
+                                }
+                                className="w-4 h-4 text-blue-500 ml-2"
+                              />
+                              <span className="ml-1 text-xs">irreg?</span>
+                            </label>
+                          )}
                         </td>
                       );
                     })}
@@ -178,7 +237,7 @@ function AddConjugationPage() {
             </table>
           </div>
 
-          {/* Submit Button */}
+          {/* Submit */}
           <div className="flex justify-center mt-4">
             <button
               onClick={handleSubmitFull}
@@ -192,5 +251,3 @@ function AddConjugationPage() {
     </div>
   );
 }
-
-export default AddConjugationPage;

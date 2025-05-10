@@ -1,23 +1,48 @@
-import { useState } from "react";
-import { addWord } from "../services/api";
+// src/pages/AddWordPage.jsx
+import { useState, useEffect } from "react";
+import { addWord, getSettings } from "../services/api";
+import { toast } from "react-toastify";
 
-function AddWordPage() {
+export default function AddWordPage() {
+  // form fields
   const [word, setWord] = useState("");
   const [translation, setTranslation] = useState("");
   const [partOfSpeech, setPartOfSpeech] = useState("");
   const [article, setArticle] = useState("");
+  const [wordClass, setWordClass] = useState("");
+
+  // settings-driven lists
+  const [partsList, setPartsList] = useState([]);
+  const [articlesList, setArticlesList] = useState([]);
+  const [classesList, setClassesList] = useState([]);
+
+  // load user settings once
+  useEffect(() => {
+    getSettings()
+      .then((s) => {
+        const vocab = s.vocab || {};
+        setPartsList(vocab.partsOfSpeech || []);
+        setArticlesList(vocab.articles || []);
+        setClassesList(vocab.classes || []);
+      })
+      .catch((err) => {
+        console.error("Failed to load settings:", err);
+      });
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await addWord(word, translation, partOfSpeech, article);
-      alert("Word added successfully!");
+      await addWord(word, translation, partOfSpeech, article, wordClass);
+      toast.success("✅ Word added successfully!");
+      // reset
       setWord("");
       setTranslation("");
       setPartOfSpeech("");
       setArticle("");
+      setWordClass("");
     } catch (error) {
-      alert("Failed to add word.");
+      toast.error("❌ Failed to add word. Please try again.");
     }
   };
 
@@ -34,6 +59,7 @@ function AddWordPage() {
         <h1 className="text-3xl font-bold mb-6 text-center">Add a Word</h1>
 
         <form onSubmit={handleSubmit} className="flex flex-col space-y-5">
+          {/* Word */}
           <input
             type="text"
             placeholder="Word"
@@ -46,6 +72,7 @@ function AddWordPage() {
             required
           />
 
+          {/* Translation */}
           <input
             type="text"
             placeholder="Translation"
@@ -58,45 +85,65 @@ function AddWordPage() {
             required
           />
 
-          <select
-            value={partOfSpeech}
-            onChange={(e) => setPartOfSpeech(e.target.value)}
-            className="
-              p-3 rounded bg-gray-700 border border-gray-600
-              focus:outline-none focus:ring-2 focus:ring-blue-500
-            "
-          >
-            <option value="">Select Part of Speech</option>
-            <option value="noun">Noun</option>
-            <option value="verb">Verb</option>
-            <option value="adjective">Adjective</option>
-            <option value="adverb">Adverb</option>
-            <option value="pronoun">Pronoun</option>
-            <option value="preposition">Preposition</option>
-            <option value="conjunction">Conjunction</option>
-            <option value="interjection">Interjection</option>
-            <option value="numeral">Numeral</option>
-            <option value="phrase">Phrase</option>
-          </select>
+          {/* Part of Speech (only if settings provide any) */}
+          {partsList.length > 0 && (
+            <select
+              value={partOfSpeech}
+              onChange={(e) => setPartOfSpeech(e.target.value)}
+              className="
+                p-3 rounded bg-gray-700 border border-gray-600
+                focus:outline-none focus:ring-2 focus:ring-blue-500
+              "
+              required
+            >
+              <option value="">Select Part of Speech</option>
+              {partsList.map((p) => (
+                <option key={p} value={p}>
+                  {p.charAt(0).toUpperCase() + p.slice(1)}
+                </option>
+              ))}
+            </select>
+          )}
 
-          <select
-            value={article}
-            onChange={(e) => setArticle(e.target.value)}
-            className="
-              p-3 rounded bg-gray-700 border border-gray-600
-              focus:outline-none focus:ring-2 focus:ring-blue-500
-            "
-          >
-            <option value="none">No Article</option>
-            <option value="un">un</option>
-            <option value="une">une</option>
-            <option value="des">des</option>
-            <option value="le">le</option>
-            <option value="la">la</option>
-            <option value="les">les</option>
-            <option value="l'">l'</option>
-          </select>
+          {/* Article (only if settings provide any) */}
+          {articlesList.length > 0 && (
+            <select
+              value={article}
+              onChange={(e) => setArticle(e.target.value)}
+              className="
+                p-3 rounded bg-gray-700 border border-gray-600
+                focus:outline-none focus:ring-2 focus:ring-blue-500
+              "
+            >
+              <option value="">No Article</option>
+              {articlesList.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          )}
 
+          {/* Class (only if settings provide any) */}
+          {classesList.length > 0 && (
+            <select
+              value={wordClass}
+              onChange={(e) => setWordClass(e.target.value)}
+              className="
+                p-3 rounded bg-gray-700 border border-gray-600
+                focus:outline-none focus:ring-2 focus:ring-blue-500
+              "
+            >
+              <option value="">No Class</option>
+              {classesList.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {/* Submit */}
           <button
             type="submit"
             className="
@@ -111,5 +158,3 @@ function AddWordPage() {
     </div>
   );
 }
-
-export default AddWordPage;

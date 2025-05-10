@@ -1,25 +1,16 @@
 import { useState, useEffect } from "react";
-import { startConjugationGameAPI, endConjugationGameAPI } from "../services/api";
+import { startConjugationGameAPI, endConjugationGameAPI, getSettings } from "../services/api";
+import { toast } from "react-toastify";
 
-// Hardcoded tenses for advanced settings
-const ALL_TENSES = [
-  "présent",
-  "passé composé",
-  "imparfait",
-  "futur simple",
-  "conditionnel présent",
-  "impératif",
-];
 
-// Example colors (if you want color-coded tenses)
-const DEFAULT_TENSE_COLORS = {
-  "présent": "#10B981",         // green
-  "passé composé": "#F59E0B",   // amber
-  "imparfait": "#3B82F6",       // blue
-  "futur simple": "#6366F1",    // indigo
-  "conditionnel présent": "#EC4899", // pink
-  "impératif": "#EF4444",       // red
-};
+// utility: generate a map { tenseString → colorString }
+function generateTenseColors(tenses) {
+  return tenses.reduce((map, tense, i) => {
+    const hue = (i * 137.508) % 360;               // evenly distribute around the wheel
+    map[tense] = `hsl(${hue.toFixed(1)}, 70%, 50%)`; // you can tweak S/L to taste
+    return map;
+  }, {});
+}
 
 function ConjugationGamePage() {
   // -------------------------------------
@@ -58,12 +49,18 @@ function ConjugationGamePage() {
 
   // Advanced
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [selectedTenses, setSelectedTenses] = useState([...ALL_TENSES]);
+  const [selectedTenses, setSelectedTenses] = useState([]);
   const [selectedGroups, setSelectedGroups] = useState([1, 2, 3]);
   const [pronominalChoice, setPronominalChoice] = useState("both");
 
+    // — what the user saved in their settings:
+  const [availableTenses,    setAvailableTenses]    = useState([]);
+  const [availableGroups,    setAvailableGroups]    = useState([]);
+  const [allowPronominal,    setAllowPronominal]    = useState(true);
+  const [allowIrregular,     setAllowIrregular]     = useState(true);
+
   // For color-coded tenses
-  const [tenseColors, setTenseColors] = useState(DEFAULT_TENSE_COLORS);
+  const [tenseColors, setTenseColors] = useState({});
 
   // Toggle advanced
   const handleToggleAdvanced = () => {
@@ -86,6 +83,27 @@ function ConjugationGamePage() {
     }
   };
 
+    // ── load the user’s conjugation‐settings ──
+  useEffect(() => {
+    getSettings()
+      .then(s => {
+        const c = s.conj || {};
+        setAvailableTenses(   c.tenses        || [] );
+        setAvailableGroups(   c.groups        || [] );
+        setAllowPronominal(   c.allowPronominal );
+        setAllowIrregular(    c.allowIrregular  );
+        // and default the “selected” filters to *all* available:
+        setSelectedTenses(    c.tenses        || [] );
+        setSelectedGroups(    c.groups        || [] );
+        // if they disallowed pronominal, force exclude:
+        setPronominalChoice( c.allowPronominal ? "both" : "exclude" );
+        // if they disallowed irregular, force “regular”:
+        setGameMode(         c.allowIrregular  ? "both" : "regular" );
+      })
+      .catch(console.error);
+  }, []);
+
+
   // -------------------------------------
   // Timer effect
   useEffect(() => {
@@ -105,6 +123,11 @@ function ConjugationGamePage() {
     return () => clearInterval(interval);
   }, [startTime, gameOver, timeLimit]);
 
+  useEffect(() => {
+    if (availableTenses.length) {
+      setTenseColors(generateTenseColors(availableTenses));
+    }
+  }, [availableTenses]);
   // -------------------------------------
   // Start Game
   const handleStartGame = async () => {
@@ -119,6 +142,7 @@ function ConjugationGamePage() {
       console.log("startConjugationGameAPI response:", response);
 
       if (!response.conjugations || response.conjugations.length === 0) {
+        toast.error("No valid conjugations returned, try different settings!")
         console.warn("No conjugations returned!");
         return;
       }
@@ -388,12 +412,31 @@ function ConjugationGamePage() {
             <p className="text-lg">Accuracy: <strong>{accuracy}%</strong></p>
           </div>
 
-          <button
-            className="mt-6 px-6 py-3 bg-blue-500 hover:bg-blue-600 rounded-lg text-white font-semibold text-lg w-full"
-            onClick={handleStartGame}
-          >
-            Play Again
-          </button>
+          <div className="mt-6 flex gap-4">
+            {/* 1) Same settings */}
+            <button
+              className="flex-1 px-5 py-3 bg-blue-500 hover:bg-blue-600 rounded-lg text-white font-semibold"
+              onClick={() => {
+                // reset only game state—but keep settings in place:
+                handleStartGame();
+              }}
+            >
+              ▶️ Play Again With Same Settings
+            </button>
+
+            {/* 2) Different settings */}
+            <button
+              className="flex-1 px-5 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-semibold"
+              onClick={() => {
+                setStartTime(null);
+                setShowSummary(false);
+                setConjugationQueue([]);
+                setCurrentIndex(0);
+              }}
+            >
+              ⚙️ Play With Different Settings
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -408,31 +451,32 @@ function ConjugationGamePage() {
 
           {/* Time Limit */}
           <label className="block text-left mb-4">
-            <span className="font-medium block mb-1">Time Limit (Seconds):</span>
+            <span className="font-medium block mb-1">Time Limit (Minutes):</span>
             <select
               className="p-2 rounded bg-gray-700 w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={timeLimit}
               onChange={(e) => setTimeLimit(parseInt(e.target.value))}
             >
-              <option value={60}>1 min</option>
               <option value={120}>2 min</option>
               <option value={300}>5 min</option>
             </select>
           </label>
 
           {/* Regular/Irregular/Both */}
-          <label className="block text-left mb-4">
-            <span className="font-medium block mb-1">Game Mode (Regular/Irregular):</span>
-            <select
-              className="p-2 rounded bg-gray-700 w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
-              value={gameMode}
-              onChange={(e) => setGameMode(e.target.value)}
-            >
-              <option value="regular">Regular</option>
-              <option value="irregular">Irregular</option>
-              <option value="both">Both</option>
-            </select>
-          </label>
+          { allowIrregular &&(
+            <label className="block text-left mb-4">
+              <span className="font-medium block mb-1">Game Mode (Regular/Irregular):</span>
+              <select
+                className="p-2 rounded bg-gray-700 w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={gameMode}
+                onChange={(e) => setGameMode(e.target.value)}
+              >
+                <option value="regular">Regular</option>
+                <option value="irregular">Irregular</option>
+                <option value="both">Both</option>
+              </select>
+            </label>
+          )}
 
           {/* Ungraded */}
           <label className="flex items-center justify-center gap-2 mb-4">
@@ -459,23 +503,21 @@ function ConjugationGamePage() {
           {/* ADVANCED OPTIONS */}
           <div className="mb-6">
             <button
-              onClick={handleToggleAdvanced}
-              className="text-blue-400 underline"
-            >
-              {showAdvanced ? "Hide Advanced Settings" : "Show Advanced Settings"}
+                onClick={handleToggleAdvanced}
+                className="w-full text-left mb-4 px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded transition"
+              >
+                Advanced Settings {showAdvanced ? "▾" : "▸"}
             </button>
             {showAdvanced && (
-              <div className="mt-4 bg-gray-800 p-4 rounded space-y-4">
-                <div>
-                  <p className="font-semibold mb-2">Tenses to Include:</p>
-                  <div className="flex flex-wrap gap-3">
-                    {ALL_TENSES.map((t) => (
-                      <label
-                        key={t}
-                        className="flex items-center space-x-2 bg-gray-700 px-2 py-1 rounded"
-                      >
+              <>
+                <div className="mb-6 p-4 bg-gray-800 rounded space-y-3">
+                  <p className="font-medium">Tenses to Include:</p>
+                  <div className="grid grid-cols-2 gap-2 max-h-40 overflow-auto">
+                    {availableTenses.map((t) => (
+                      <label key={t} className="flex items-center gap-2">
                         <input
                           type="checkbox"
+                          className="h-4 w-4 text-blue-500"
                           checked={selectedTenses.includes(t)}
                           onChange={() => handleTenseToggle(t)}
                         />
@@ -484,62 +526,46 @@ function ConjugationGamePage() {
                     ))}
                   </div>
                 </div>
-
-                <div>
-                  <p className="font-semibold mb-2">Pronominal Verbs:</p>
-                  <div className="flex gap-4">
-                    <label className="flex items-center space-x-2">
-                      <input
-                        type="radio"
-                        name="pronominal"
-                        value="exclude"
-                        checked={pronominalChoice === "exclude"}
-                        onChange={() => setPronominalChoice("exclude")}
-                      />
-                      <span>Exclude</span>
-                    </label>
-                    <label className="flex items-center space-x-2">
-                      <input
-                        type="radio"
-                        name="pronominal"
-                        value="only"
-                        checked={pronominalChoice === "only"}
-                        onChange={() => setPronominalChoice("only")}
-                      />
-                      <span>Only</span>
-                    </label>
-                    <label className="flex items-center space-x-2">
-                      <input
-                        type="radio"
-                        name="pronominal"
-                        value="both"
-                        checked={pronominalChoice === "both"}
-                        onChange={() => setPronominalChoice("both")}
-                      />
-                      <span>Both</span>
-                    </label>
+          
+                {allowPronominal && (
+                  <div className="mb-6 p-4 bg-gray-800 rounded space-y-3">
+                    <p className="font-medium">Pronominal Verbs:</p>
+                    <div className="flex gap-4">
+                      {["exclude", "only", "both"].map((choice) => (
+                        <label key={choice} className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            className="h-4 w-4 text-blue-500"
+                            name="pronominal"
+                            value={choice}
+                            checked={pronominalChoice === choice}
+                            onChange={() => setPronominalChoice(choice)}
+                          />
+                          <span>{choice.charAt(0).toUpperCase() + choice.slice(1)}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
-
-                <div>
-                  <p className="font-semibold mb-2">Groups to Include:</p>
-                  <div className="flex gap-3">
-                    {[1,2,3].map((grp) => (
-                      <label
-                        key={grp}
-                        className="flex items-center space-x-2 bg-gray-700 px-2 py-1 rounded"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedGroups.includes(grp)}
-                          onChange={() => handleGroupToggle(grp)}
-                        />
-                        <span>Group {grp}</span>
-                      </label>
-                    ))}
+                )}
+                {availableGroups.length>0 && (
+                  <div className="mb-6 p-4 bg-gray-800 rounded space-y-3">
+                    <p className="font-medium">Groups to Include:</p>
+                    <div className="grid grid-cols-2 gap-2 max-h-40 overflow-auto">
+                      {availableGroups.map((g) => (
+                        <label key={g} className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 text-blue-500"
+                            checked={selectedGroups.includes(g)}
+                            onChange={() => handleGroupToggle(g)}
+                          />
+                          <span>Group {g}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              </div>
+                )}
+              </>
             )}
           </div>
 
@@ -623,17 +649,22 @@ function ConjugationGamePage() {
             {isCorrect ? "Correct!" : "Wrong!"}
           </p>
         )}
-
         {!zenMode && (
-          <div className="mt-6">
+          <div className="mt-4">
             <p className="text-sm">Time Left: {timeRemaining}s</p>
-            <p className="text-sm">
-              Accuracy:{" "}
-              {totalAttempts > 0
-                ? ((correctAnswers / totalAttempts) * 100).toFixed(2)
-                : 0}
-              %
-            </p>
+            {ungraded ? (
+              <p className="text-sm">
+                Words Completed: {gameResults.length}
+              </p>
+            ) : (
+              <p className="text-sm">
+                Accuracy:{" "}
+                {totalAttempts > 0
+                  ? ((correctAnswers / totalAttempts) * 100).toFixed(2)
+                  : 0}
+                %
+              </p>
+            )}
           </div>
         )}
       </div>

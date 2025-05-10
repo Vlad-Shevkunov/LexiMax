@@ -6,7 +6,7 @@ from flask_cors import CORS
 import random
 from datetime import datetime, timedelta
 import psycopg2
-from psycopg2.extras import RealDictCursor  # ✅ Add this import
+from psycopg2.extras import RealDictCursor, Json  # ✅ Add this import
 import os 
 from dotenv import load_dotenv
 load_dotenv()  # This loads the variables from .env
@@ -127,6 +127,40 @@ def logout():
     session.clear()  # Remove all keys from session
     return jsonify({"message": "Logged out successfully"})
 
+@app.route("/settings", methods=["GET"])
+@login_required
+def get_settings():
+    user_id=session.get("user_id")
+    conn = get_db_connection()
+    cur  = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("SELECT settings FROM users WHERE id = %s", (user_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not row:
+        return jsonify({"error": "User not found"}), 404
+    return jsonify(row["settings"]), 200
+
+@app.route("/settings", methods=["PUT"])
+@login_required
+def update_settings():
+    user_id=session.get("user_id")
+    new_settings = request.get_json()
+    if not isinstance(new_settings, dict):
+        return jsonify({"error": "Invalid settings format"}), 400
+
+    conn = get_db_connection()
+    cur  = conn.cursor()
+    cur.execute(
+      "UPDATE users SET settings = %s WHERE id = %s",
+      (Json(new_settings), user_id)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({"status": "ok"}), 200
+
+
 # Updated API to handle multiple translations
 @app.route('/add_word', methods=['POST'])
 @login_required
@@ -137,10 +171,12 @@ def add_word():
         translation = data.get('translation')  # Single translation
         part_of_speech = data.get('part_of_speech')
         article = data.get('article')
+        word_class = data.get('word_class')
         user_id=session.get("user_id")
         if article in ["none", "", None]:  
             article = "none"
-
+        if word_class in ["none", "", None]:
+            word_class = "none"
         if not word or not translation:
             return jsonify({"error": "Word and translation are required"}), 400
 
@@ -167,8 +203,8 @@ def add_word():
             # ✅ Insert new word & get ID
             print("here")
             cur.execute(
-                "INSERT INTO vocabulary (word, translations, part_of_speech, article, user_id) VALUES (%s, %s, %s, %s, %s) RETURNING id;",
-                (word, [translation], part_of_speech, article, user_id)
+                "INSERT INTO vocabulary (word, translations, part_of_speech, article, user_id, class) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id;",
+                (word, [translation], part_of_speech, article, user_id, word_class)
             )
             result=cur.fetchone()
             word_id = result["id"]
@@ -215,10 +251,14 @@ def update_word(word_id):
         new_word = data.get('word').strip().lower()
         translations = data.get('translation', [])  # Now handling a full list
         part_of_speech = data.get('part_of_speech')
+        word_class = data.get('word_class')
+        print(word_class)
         article = data.get('article')
 
         if article in ["none", "", None]:  
             article = "none"
+        if word_class in ["none", "", None]:
+            word_class = "none"
 
         if not new_word or not translations or len(translations) == 0:
             return jsonify({"error": "Word and at least one translation are required"}), 400
@@ -238,9 +278,9 @@ def update_word(word_id):
         # ✅ Update `vocabulary` table
         cur.execute("""
             UPDATE vocabulary 
-            SET word = %s, translations = %s, part_of_speech = %s, article = %s
+            SET word = %s, translations = %s, part_of_speech = %s, article = %s, class = %s
             WHERE id = %s AND user_id = %s;
-        """, (new_word, translations, part_of_speech, article, word_id, user_id))
+        """, (new_word, translations, part_of_speech, article, word_class, word_id, user_id))
 
         # ✅ If the word itself changed, update `word_tracking`
         if old_word != new_word:
@@ -302,8 +342,9 @@ def start_game():
         user_id=session.get("user_id")
         if not request.is_json:
             return jsonify({"error": "Invalid JSON format"}), 400
-
         data = request.get_json()
+        classes    = data.get("classes", [])
+        parts_of_speech = data.get("parts_of_speech", [])
         print("Received JSON Data:", data)
 
         conn = get_db_connection()
@@ -347,15 +388,30 @@ def start_game():
         conn.commit()
         print("✅ Updated scores for existing words.")
 
-        # ✅ Step 4: Preload words (return full word data)
-        cur.execute("""
-            SELECT v.id, v.word, v.translations, v.part_of_speech, v.article
-            FROM vocabulary v
-            JOIN word_tracking wt ON v.id = wt.word_id
-            WHERE v.user_id = %s
-            ORDER BY RANDOM() * wt.score DESC
-            LIMIT 500;
-        """, (user_id,))
+        # --- Step 2: build WHERE clauses ---
+        where_clauses = ["v.user_id = %(user_id)s"]
+        params = {"user_id": user_id}
+
+        if classes:
+            where_clauses.append("v.class = ANY(%(classes)s)")
+            params["classes"] = classes
+
+        if parts_of_speech:
+            where_clauses.append("v.part_of_speech = ANY(%(parts_of_speech)s)")
+            params["parts_of_speech"] = parts_of_speech
+
+        where_sql = " AND ".join(where_clauses)
+
+        # --- Step 3: pick your words ---
+        query = f"""
+        SELECT v.id, v.word, v.translations, v.part_of_speech, v.article, v.class
+        FROM vocabulary v
+        JOIN word_tracking wt ON v.id = wt.word_id
+        WHERE {where_sql}
+        ORDER BY RANDOM() * wt.score DESC
+        LIMIT 500
+        """
+        cur.execute(query, params)
         words = cur.fetchall()
 
         cur.close()
@@ -385,6 +441,8 @@ def end_game():
     total_attempts = data.get("total_attempts")  # total words attempted
     score = data.get("score")                   # final correct words
     ungraded = data.get("ungraded", False)      # new boolean
+    classes      = data.get("classes", ["all"])  # default to ['all']
+    parts_of_speech = data.get("parts_of_speech", ["all"])
 
     if results is None or total_attempts is None or score is None:
         return jsonify({"error": "Missing required data"}), 400
@@ -396,9 +454,9 @@ def end_game():
         # Insert a row in game_runs, now including 'ungraded'
         cur.execute("""
             INSERT INTO game_runs 
-              (time_limit, game_type, zen_mode, total_words_attempted, correct_words, ungraded, user_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s);
-        """, (time_limit, game_type, zen_mode, total_attempts, score, ungraded, user_id))
+              (time_limit, game_type, zen_mode, total_words_attempted, correct_words, ungraded, user_id, classes, parts_of_speech)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);
+        """, (time_limit, game_type, zen_mode, total_attempts, score, ungraded, user_id, classes, parts_of_speech))
 
         # For each word attempt, update word_tracking
         for result in results:
@@ -448,13 +506,13 @@ def add_conjugation():
         data = request.json
         user_id=session.get("user_id")
         verb = data.get('verb').strip().lower()
-        person = data.get('person').strip().lower()
-        tense = data.get('tense').strip().lower()
+        person = data.get('person').strip()
+        tense = data.get('tense').strip()
         conjugation = data.get('conjugation').strip().lower()
         irregular = data.get('irregular', False)  # Boolean flag
         # New fields
         pronominal = data.get('pronominal', False)  # boolean
-        verb_group = data.get('verb_group', 0)      # int
+        verb_group = data.get('verb_group')     
 
         if not verb or not person or not tense or not conjugation:
             return jsonify({"error": "All fields (verb, person, tense, conjugation) are required"}), 400
@@ -525,14 +583,14 @@ def update_conjugation(conjugation_id):
         data = request.json
         user_id=session.get("user_id")
         new_verb = data.get('verb').strip().lower()
-        new_person = data.get('person').strip().lower()
-        new_tense = data.get('tense').strip().lower()
+        new_person = data.get('person').strip()
+        new_tense = data.get('tense').strip()
         new_conjugation = data.get('conjugation').strip().lower()
         irregular = data.get('irregular', False)  # Boolean flag
 
         # new fields
         pronominal = data.get('pronominal', False)
-        verb_group = data.get('verb_group', 0)
+        verb_group = data.get('verb_group')
 
         if not new_verb or not new_person or not new_tense or not new_conjugation:
             return jsonify({"error": "All fields (verb, person, tense, conjugation) are required"}), 400
@@ -925,7 +983,7 @@ def get_stats():
         # Most frequent format played
         cur.execute(f"""
             SELECT CONCAT('Vocabulary (', game_type, '), ', (time_limit * 60), 's, ',
-                          CASE WHEN zen_mode THEN 'Zen' ELSE 'Non-Zen' END) AS format,
+                          CASE WHEN ungraded THEN 'Ungraded' ELSE 'Graded' END) AS format,
                           COUNT(*) AS cnt
             FROM game_runs {game_clause}
             GROUP BY format;
@@ -934,7 +992,7 @@ def get_stats():
 
         cur.execute(f"""
             SELECT CONCAT('Conjugation, ', time_limit, 's, ',
-                          CASE WHEN zen_mode THEN 'Zen' ELSE 'Non-Zen' END) AS format,
+                          CASE WHEN ungraded THEN 'Ungraded' ELSE 'Graded' END) AS format,
                           COUNT(*) AS cnt
             FROM conjugation_game_runs {conj_game_clause}
             GROUP BY format;
@@ -1049,7 +1107,7 @@ def get_stats():
 
         # --- BEST/WORST CONJUGATIONS ---
         cur.execute(f"""
-            SELECT verb, total_attempts,
+            SELECT verb, tense, person, total_attempts,
                    COALESCE(array_length(mistake_timestamps, 1), 0) AS mistakes
             FROM conjugation_tracking {conj_tracking_clause};
         """, params)

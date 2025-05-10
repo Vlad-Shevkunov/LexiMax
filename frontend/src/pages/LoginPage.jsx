@@ -16,6 +16,7 @@ function LoginPage() {
       await loginUser(username, password);
       // After successful login, navigate to a dashboard or home page.
       toast.success("Successfully logged in as " + username);
+      navigate("/stats");
     } catch (err) {
         setError("Login failed");
         toast.error("Login failed!");

@@ -1,28 +1,54 @@
+// src/pages/ConjugationListPage.jsx
 import { useEffect, useState } from "react";
 import {
   getConjugations,
   updateConjugation,
   deleteConjugation,
+  getSettings,
 } from "../services/api";
 
-function ConjugationListPage() {
+export default function ConjugationListPage() {
+  // ── Loaded Settings ───────────────────────────────────────────────
+  const [loadingSettings, setLoadingSettings] = useState(true);
+  const [persons, setPersons] = useState([]);
+  const [tenses, setTenses] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [allowPronominal, setAllowPronominal] = useState(false);
+  const [allowIrregular, setAllowIrregular] = useState(false);
+
+  // ── Conjugations Data & Edit State ────────────────────────────────
   const [conjugations, setConjugations] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [editData, setEditData] = useState({});
-  const [verbGroupEdits, setVerbGroupEdits] = useState({}); // For editing verb header info
-  const allTenses = [
-    "présent",
-    "passé composé",
-    "imparfait",
-    "futur simple",
-    "conditionnel présent",
-    "impératif"
-  ];
-  const persons = ["je", "tu", "il/elle/on", "nous", "vous", "ils/elles"];
+  const [verbGroupEdits, setVerbGroupEdits] = useState({}); // { [verb]: { editing,newVerb,newGroup } }
 
-  // State to switch between "row" view and "verb" view.
+  // ── View Mode: "row" or "verb" ────────────────────────────────────
   const [viewMode, setViewMode] = useState("row");
 
+  // ── Fetch user settings on mount ──────────────────────────────────
+  useEffect(() => {
+    getSettings()
+      .then((s) => {
+        // Default fallback if user hasn't set these
+        const c = s.conj || {};
+        setPersons(c.persons?.length ? c.persons : ["je","tu","il/elle/on","nous","vous","ils/elles"]);
+        setTenses(c.tenses?.length ? c.tenses : [
+          "présent","passé composé","imparfait","futur simple","conditionnel présent","impératif"
+        ]);
+        setGroups(c.groups?.length ? c.groups : []);
+        setAllowPronominal(!!c.allowPronominal);
+        setAllowIrregular(!!c.allowIrregular);
+      })
+      .catch((err) => {
+        console.error("Failed to load settings:", err);
+        alert("Could not load conjugation settings.");
+      })
+      .finally(() => {
+        setLoadingSettings(false);
+      });
+  }, []);
+
+  // ── Fetch conjugations whenever the page mounts or after edits ────
   useEffect(() => {
     fetchConjugations();
   }, []);
@@ -31,36 +57,39 @@ function ConjugationListPage() {
     try {
       const data = await getConjugations();
       setConjugations(data);
-    } catch (error) {
-      console.error("Error fetching conjugations:", error);
+    } catch (e) {
+      console.error("Error fetching conjugations:", e);
     }
   };
 
-  const handleEdit = (conjugation) => {
-    setEditingId(conjugation.id);
+  if (loadingSettings) {
+    return <div className="p-6 text-white">Loading settings…</div>;
+  }
+
+  // Group for "verb" view
+  const grouped = conjugations.reduce((acc, c) => {
+    (acc[c.verb] = acc[c.verb] || []).push(c);
+    return acc;
+  }, {});
+
+  // ── Handlers ───────────────────────────────────────────────────────
+  const handleEdit = (c) => {
+    setEditingId(c.id);
     setEditData({
-      ...conjugation,
-      verbGroup: conjugation.verb_group, // ensuring consistent naming
+      ...c,
+      verbGroup: c.verb_group,
     });
   };
-
   const handleCancelEdit = () => {
     setEditingId(null);
     setEditData({});
   };
-
   const handleChange = (e, field) => {
     setEditData({ ...editData, [field]: e.target.value });
   };
-
-  const handleToggleIrregular = () => {
-    setEditData({ ...editData, irregular: !editData.irregular });
+  const handleToggle = (field) => {
+    setEditData({ ...editData, [field]: !editData[field] });
   };
-
-  const handleTogglePronominal = () => {
-    setEditData({ ...editData, pronominal: !editData.pronominal });
-  };
-
   const handleSave = async () => {
     try {
       await updateConjugation(
@@ -75,110 +104,87 @@ function ConjugationListPage() {
       );
       fetchConjugations();
       setEditingId(null);
-    } catch (error) {
-      console.error("Error updating conjugation:", error);
+    } catch (e) {
+      console.error("Error saving conjugation:", e);
     }
   };
-
-  const handleDelete = async (conjugationId) => {
+  const handleDelete = async (id) => {
     try {
-      await deleteConjugation(conjugationId);
-      setConjugations((prev) =>
-        prev.filter((conjugation) => conjugation.id !== conjugationId)
-      );
-    } catch (error) {
-      console.error("Error deleting conjugation:", error);
+      await deleteConjugation(id);
+      setConjugations((prev) => prev.filter((c) => c.id !== id));
+    } catch (e) {
+      console.error("Error deleting conjugation:", e);
     }
   };
 
-  // Group conjugations by verb for the verb view.
-  const groupedConjugations = conjugations.reduce((groups, conj) => {
-    const verb = conj.verb;
-    if (!groups[verb]) {
-      groups[verb] = [];
-    }
-    groups[verb].push(conj);
-    return groups;
-  }, {});
-
-  // --- Functions for editing verb headers for each verb group ---
+  // Verb‐header edits
   const startVerbEdit = (verb) => {
-    const group = groupedConjugations[verb][0].verb_group;
+    const first = grouped[verb][0];
     setVerbGroupEdits((prev) => ({
       ...prev,
-      [verb]: { editing: true, newVerb: verb, newGroup: group, originalVerb: verb },
+      [verb]: { editing: true, newVerb: verb, newGroup: first.verb_group, newPronominal: first.pronominal },
     }));
   };
-
-  const handleVerbEditChange = (originalVerb, field, value) => {
+  const handleVerbEditChange = (verb, field, value) => {
     setVerbGroupEdits((prev) => ({
       ...prev,
-      [originalVerb]: { ...prev[originalVerb], [field]: value },
+      [verb]: { ...prev[verb], [field]: value },
     }));
   };
-
-  const cancelVerbEdit = (originalVerb) => {
+  const cancelVerbEdit = (verb) => {
     setVerbGroupEdits((prev) => {
-      const copy = { ...prev };
-      delete copy[originalVerb];
-      return copy;
+      const nxt = { ...prev };
+      delete nxt[verb];
+      return nxt;
     });
   };
-
-  const saveVerbEdit = async (originalVerb) => {
-    if (!verbGroupEdits[originalVerb]) return;
-    const { newVerb, newGroup } = verbGroupEdits[originalVerb];
-    const groupConjugations = groupedConjugations[originalVerb];
+  const saveVerbEdit = async (verb) => {
+    const e = verbGroupEdits[verb];
+    if (!e) return;
     try {
-      // Update every conjugation in the group with the new verb name and group.
       await Promise.all(
-        groupConjugations.map((c) =>
+        grouped[verb].map((c) =>
           updateConjugation(
             c.id,
-            newVerb,
+            e.newVerb,
             c.person,
             c.tense,
             c.conjugation,
             c.irregular,
-            c.pronominal,
-            parseInt(newGroup)
+            (e.newPronominal !== undefined ? e.newPronominal : c.pronominal),
+            (groups.length>0 ? e.newGroup :  c.verb_group)
           )
         )
       );
-      cancelVerbEdit(originalVerb);
+      cancelVerbEdit(verb);
       fetchConjugations();
-    } catch (error) {
-      console.error("Error updating verb group:", error);
+    } catch (err) {
+      console.error("Error updating verb group:", err);
     }
   };
 
+  // ── Render ───────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen w-screen flex items-center justify-center bg-gradient-to-r from-gray-900 via-gray-800 to-black text-white p-8">
       <div className="w-full max-w-5xl bg-gray-900 p-6 rounded-lg shadow-lg overflow-x-auto mx-auto">
         <h1 className="text-3xl font-bold mb-6 text-center">Conjugation List</h1>
 
-        {/* Toggle Bar */}
+        {/* Toggle */}
         <div className="flex justify-center mb-4 space-x-4">
-          <button
-            onClick={() => setViewMode("row")}
-            className={`px-4 py-2 rounded ${
-              viewMode === "row" ? "bg-blue-600" : "bg-gray-600"
-            } text-white font-semibold`}
-          >
-            Row View
-          </button>
-          <button
-            onClick={() => setViewMode("verb")}
-            className={`px-4 py-2 rounded ${
-              viewMode === "verb" ? "bg-blue-600" : "bg-gray-600"
-            } text-white font-semibold`}
-          >
-            Verb View
-          </button>
+          {["row", "verb"].map((m) => (
+            <button
+              key={m}
+              onClick={() => setViewMode(m)}
+              className={`px-4 py-2 rounded ${
+                viewMode === m ? "bg-blue-600" : "bg-gray-600"
+              } text-white font-semibold`}
+            >
+              {m === "row" ? "Row View" : "Verb View"}
+            </button>
+          ))}
         </div>
 
         {viewMode === "row" ? (
-          // ROW VIEW: Current table layout.
           <table className="w-full text-left border-collapse border border-gray-700 rounded-lg">
             <thead className="bg-gray-800 text-white">
               <tr>
@@ -186,52 +192,50 @@ function ConjugationListPage() {
                 <th className="p-3 border border-gray-700">Person</th>
                 <th className="p-3 border border-gray-700">Tense</th>
                 <th className="p-3 border border-gray-700">Conjugation</th>
-                <th className="p-3 border border-gray-700">Irregular</th>
-                <th className="p-3 border border-gray-700">Pronominal</th>
-                <th className="p-3 border border-gray-700">Group</th>
+                {allowIrregular && <th className="p-3 border border-gray-700">Irregular</th>}
+                {allowPronominal && <th className="p-3 border border-gray-700">Pronominal</th>}
+                {groups.length>0 && <th className="p-3 border border-gray-700">Group</th>}
                 <th className="p-3 border border-gray-700">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {conjugations.map((conjugation) => {
-                const isEditing = editingId === conjugation.id;
+              {conjugations.map((c) => {
+                const editing = editingId === c.id;
                 return (
                   <tr
-                    key={conjugation.id}
+                    key={c.id}
                     className="bg-gray-900 text-white hover:bg-gray-800 transition-colors duration-150"
                   >
-                    {isEditing ? (
+                    {editing ? (
                       <>
                         <td className="p-3 border border-gray-700">
                           <input
                             type="text"
                             value={editData.verb}
                             onChange={(e) => handleChange(e, "verb")}
-                            className="bg-gray-700 border border-gray-600 rounded p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="w-full bg-gray-700 border border-gray-600 rounded p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                         </td>
                         <td className="p-3 border border-gray-700">
                           <select
                             value={editData.person}
                             onChange={(e) => handleChange(e, "person")}
-                            className="bg-gray-700 border border-gray-600 rounded p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="w-full bg-gray-700 border border-gray-600 rounded p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
-                            <option value="je">Je</option>
-                            <option value="tu">Tu</option>
-                            <option value="il/elle/on">Il/Elle/On</option>
-                            <option value="nous">Nous</option>
-                            <option value="vous">Vous</option>
-                            <option value="ils/elles">Ils/Elles</option>
+                            {persons.map((p) => (
+                              <option key={p} value={p}>
+                                {p}
+                              </option>
+                            ))}
                           </select>
                         </td>
                         <td className="p-3 border border-gray-700">
                           <select
                             value={editData.tense}
                             onChange={(e) => handleChange(e, "tense")}
-                            className="bg-gray-700 border border-gray-600 rounded p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="w-full bg-gray-700 border border-gray-600 rounded p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
-                            <option value="">Select Tense</option>
-                            {allTenses.map((t) => (
+                            {tenses.map((t) => (
                               <option key={t} value={t}>
                                 {t}
                               </option>
@@ -243,49 +247,55 @@ function ConjugationListPage() {
                             type="text"
                             value={editData.conjugation}
                             onChange={(e) => handleChange(e, "conjugation")}
-                            className="bg-gray-700 border border-gray-600 rounded p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="w-full bg-gray-700 border border-gray-600 rounded p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                         </td>
-                        <td className="p-3 border border-gray-700 text-center">
-                          <input
-                            type="checkbox"
-                            checked={editData.irregular}
-                            onChange={handleToggleIrregular}
-                            className="w-4 h-4 text-blue-500 focus:ring-blue-500"
-                          />
-                        </td>
-                        <td className="p-3 border border-gray-700 text-center">
-                          <input
-                            type="checkbox"
-                            checked={editData.pronominal}
-                            onChange={handleTogglePronominal}
-                            className="w-4 h-4 text-blue-500 focus:ring-blue-500"
-                          />
-                        </td>
-                        <td className="p-3 border border-gray-700">
-                          <select
-                            value={editData.verbGroup}
-                            onChange={(e) =>
-                              setEditData({ ...editData, verbGroup: parseInt(e.target.value) })
-                            }
-                            className="bg-gray-700 border border-gray-600 rounded p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          >
-                            <option value={0}>0</option>
-                            <option value={1}>1</option>
-                            <option value={2}>2</option>
-                            <option value={3}>3</option>
-                          </select>
-                        </td>
+                        {allowIrregular && (
+                          <td className="p-3 border border-gray-700 text-center">
+                            <input
+                              type="checkbox"
+                              checked={editData.irregular}
+                              onChange={() => handleToggle("irregular")}
+                              className="h-4 w-4 text-blue-500"
+                            />
+                          </td>
+                        )}
+                        {allowPronominal && (
+                          <td className="p-3 border border-gray-700 text-center">
+                            <input
+                              type="checkbox"
+                              checked={editData.pronominal}
+                              onChange={() => handleToggle("pronominal")}
+                              className="h-4 w-4 text-blue-500"
+                            />
+                          </td>
+                        )}
+                        {groups.length>0 && (
+                          <td className="p-3 border border-gray-700">
+                            <select
+                              value={editData.verbGroup}
+                              onChange={(e) => handleChange(e, "verbGroup")}
+                              className="w-full bg-gray-700 border border-gray-600 rounded p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value={0}>0 – Unknown</option>
+                              {groups.map((g) => (
+                                <option key={g} value={g}>
+                                  {g}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                        )}
                         <td className="p-3 border border-gray-700 flex space-x-2">
                           <button
                             onClick={handleSave}
-                            className="bg-green-600 px-3 py-1 rounded text-white hover:bg-green-700 transition-colors duration-150"
+                            className="bg-green-600 px-3 py-1 rounded text-white hover:bg-green-700 transition"
                           >
                             Save
                           </button>
                           <button
                             onClick={handleCancelEdit}
-                            className="bg-gray-600 px-3 py-1 rounded text-white hover:bg-gray-700 transition-colors duration-150"
+                            className="bg-gray-600 px-3 py-1 rounded text-white hover:bg-gray-700 transition"
                           >
                             Cancel
                           </button>
@@ -293,27 +303,31 @@ function ConjugationListPage() {
                       </>
                     ) : (
                       <>
-                        <td className="p-3 border border-gray-700">{conjugation.verb}</td>
-                        <td className="p-3 border border-gray-700">{conjugation.person}</td>
-                        <td className="p-3 border border-gray-700">{conjugation.tense}</td>
-                        <td className="p-3 border border-gray-700">{conjugation.conjugation}</td>
-                        <td className="p-3 border border-gray-700 text-center">
-                          {conjugation.irregular ? "✅" : "❌"}
-                        </td>
-                        <td className="p-3 border border-gray-700 text-center">
-                          {conjugation.pronominal ? "✅" : "❌"}
-                        </td>
-                        <td className="p-3 border border-gray-700">{conjugation.verb_group}</td>
+                        <td className="p-3 border border-gray-700">{c.verb}</td>
+                        <td className="p-3 border border-gray-700">{c.person}</td>
+                        <td className="p-3 border border-gray-700">{c.tense}</td>
+                        <td className="p-3 border border-gray-700">{c.conjugation}</td>
+                        {allowIrregular && (
+                          <td className="p-3 border border-gray-700 text-center">
+                            {c.irregular ? "✅" : "❌"}
+                          </td>
+                        )}
+                        {allowPronominal && (
+                          <td className="p-3 border border-gray-700 text-center">
+                            {c.pronominal ? "✅" : "❌"}
+                          </td>
+                        )}
+                        {groups.length>0 && <td className="p-3 border border-gray-700">{c.verb_group}</td> }
                         <td className="p-3 border border-gray-700 flex space-x-2">
                           <button
-                            onClick={() => handleEdit(conjugation)}
-                            className="bg-blue-600 px-3 py-1 rounded text-white hover:bg-blue-700 transition-colors duration-150"
+                            onClick={() => handleEdit(c)}
+                            className="bg-blue-600 px-3 py-1 rounded text-white hover:bg-blue-700 transition"
                           >
                             Edit
                           </button>
                           <button
-                            onClick={() => handleDelete(conjugation.id)}
-                            className="bg-red-600 px-3 py-1 rounded text-white hover:bg-red-700 transition-colors duration-150"
+                            onClick={() => handleDelete(c.id)}
+                            className="bg-red-600 px-3 py-1 rounded text-white hover:bg-red-700 transition"
                           >
                             Delete
                           </button>
@@ -326,46 +340,58 @@ function ConjugationListPage() {
             </tbody>
           </table>
         ) : (
-          // VERB VIEW: Group by verb and display in a grid layout.
-          Object.keys(groupedConjugations).map((verb) => {
-            const groupConjugations = groupedConjugations[verb];
-            // Get the current group (assume all conjugations in group share same group)
-            const currentGroup = groupConjugations[0].verb_group;
-            const verbEdit = verbGroupEdits[verb];
+          // --- Verb View ---
+          Object.keys(grouped).map((verb) => {
+            const rows = grouped[verb];
+            const vg = rows[0].verb_group;
+            const edit = verbGroupEdits[verb];
             return (
               <div key={verb} className="bg-gray-800 p-4 rounded-lg mb-6">
                 <div className="flex items-center justify-center mb-4">
-                  {verbEdit && verbEdit.editing ? (
+                  {edit?.editing ? (
                     <>
                       <input
                         type="text"
-                        value={verbEdit.newVerb}
-                        onChange={(e) =>
-                          handleVerbEditChange(verb, "newVerb", e.target.value)
-                        }
+                        value={edit.newVerb}
+                        onChange={(e) => handleVerbEditChange(verb, "newVerb", e.target.value)}
                         className="bg-gray-700 border border-gray-600 rounded p-2 mr-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
-                      <select
-                        value={verbEdit.newGroup}
-                        onChange={(e) =>
-                          handleVerbEditChange(verb, "newGroup", e.target.value)
-                        }
-                        className="bg-gray-700 border border-gray-600 rounded p-2 mr-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value={0}>0</option>
-                        <option value={1}>1</option>
-                        <option value={2}>2</option>
-                        <option value={3}>3</option>
-                      </select>
+                      {allowPronominal && (
+                        <label className="flex items-center gap-2 mr-4">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 text-blue-500"
+                            checked={verbGroupEdits[verb].newPronominal}
+                            onChange={e =>
+                              handleVerbEditChange(verb, "newPronominal", e.target.checked)
+                            }
+                          />
+                          <span>Pronominal</span>
+                        </label>
+                      )}
+                      {groups.length>0 && (
+                        <select
+                          value={edit.newGroup}
+                          onChange={(e) => handleVerbEditChange(verb, "newGroup", e.target.value)}
+                          className="bg-gray-700 border border-gray-600 rounded p-2 mr-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value={0}>0 – Unknown</option>
+                          {groups.map((g) => (
+                            <option key={g} value={g}>
+                              {g}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                       <button
                         onClick={() => saveVerbEdit(verb)}
-                        className="px-3 py-1 rounded bg-green-600 text-white hover:bg-green-700 transition-colors duration-150 mr-2"
+                        className="px-3 py-1 rounded bg-green-600 text-white hover:bg-green-700 transition mr-2"
                       >
                         Save
                       </button>
                       <button
                         onClick={() => cancelVerbEdit(verb)}
-                        className="px-3 py-1 rounded bg-gray-600 text-white hover:bg-gray-700 transition-colors duration-150"
+                        className="px-3 py-1 rounded bg-gray-600 text-white hover:bg-gray-700 transition"
                       >
                         Cancel
                       </button>
@@ -373,82 +399,98 @@ function ConjugationListPage() {
                   ) : (
                     <>
                       <h2 className="text-2xl font-bold mr-4">{verb}</h2>
-                      <span className="mr-4">Group: {currentGroup}</span>
+                      {allowPronominal && !edit?.editing && (
+                        <span className="mr-4">
+                          Pronominal: {rows[0].pronominal ? "✅" : "❌"}
+                        </span>
+                      )}
+                      {groups.length > 0 && ( <span className="mr-4">Group: {vg}</span> )}
                       <button
                         onClick={() => startVerbEdit(verb)}
-                        className="px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-150"
+                        className="px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 transition"
                       >
                         Edit Verb
                       </button>
                     </>
                   )}
                 </div>
-                {/* Conjugation Grid for this verb */}
                 <table className="w-full text-center border border-gray-700 rounded-lg">
                   <thead className="bg-gray-900 text-white">
                     <tr>
-                      <th className="p-3 border border-gray-700">Person / Tense</th>
-                      {allTenses.map((tense) => (
-                        <th key={tense} className="p-3 border border-gray-700">{tense}</th>
+                      <th className="p-3 border border-gray-700">Person/Tense</th>
+                      {tenses.map((t) => (
+                        <th key={t} className="p-3 border border-gray-700">{t}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {persons.map((person) => (
-                      <tr key={person} className="bg-gray-900 hover:bg-gray-800 transition-colors duration-150">
-                        <td className="p-3 border border-gray-700 font-semibold">{person}</td>
-                        {allTenses.map((tense) => {
-                          // Find the conjugation for this person and tense
-                          const cell = groupConjugations.find(
-                            (c) => c.person === person && c.tense === tense
-                          );
+                    {persons.map((p) => (
+                      <tr key={p} className="bg-gray-900 hover:bg-gray-800 transition">
+                        <td className="p-3 border border-gray-700 font-semibold">{p}</td>
+                        {tenses.map((t) => {
+                          const cell = rows.find((r) => r.person === p && r.tense === t);
+                          console.log(`looking for p=${p} t=${t} →`, cell);
+                          if (!cell) return <td key={t} className="p-3 border border-gray-700">—</td>;
+                          const inEdit = editingId === cell.id;
                           return (
-                            <td key={tense} className="p-3 border border-gray-700">
-                              {cell ? (
-                                editingId === cell.id ? (
-                                  <div>
-                                    <input
-                                      type="text"
-                                      value={editData.conjugation}
-                                      onChange={(e) => handleChange(e, "conjugation")}
-                                      className="bg-gray-700 border border-gray-600 rounded p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2"
-                                    />
-                                    <div className="flex justify-center space-x-2">
-                                      <button
-                                        onClick={handleSave}
-                                        className="bg-green-600 px-2 py-1 rounded text-white hover:bg-green-700 transition-colors duration-150 text-sm"
-                                      >
-                                        Save
-                                      </button>
-                                      <button
-                                        onClick={handleCancelEdit}
-                                        className="bg-gray-600 px-2 py-1 rounded text-white hover:bg-gray-700 transition-colors duration-150 text-sm"
-                                      >
-                                        Cancel
-                                      </button>
-                                    </div>
+                            <td key={t} className="p-3 border border-gray-700">
+                              {inEdit ? (
+                                <div>
+                                  <input
+                                    type="text"
+                                    value={editData.conjugation}
+                                    onChange={(e) => handleChange(e, "conjugation")}
+                                    className="bg-gray-700 border border-gray-600 rounded p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2"
+                                  />
+                                  {allowIrregular && (
+                                    <label className="flex items-center justify-center mt-2">
+                                      <input
+                                        type="checkbox"
+                                        className="h-4 w-4 text-blue-500"
+                                        checked={editData.irregular}
+                                        onChange={() => handleToggle("irregular")}
+                                      />
+                                      <span className="ml-1">Irregular</span>
+                                    </label>
+                                  )}
+                                  <div className="flex justify-center space-x-2">
+                                    <button
+                                      onClick={handleSave}
+                                      className="bg-green-600 px-2 py-1 rounded text-white hover:bg-green-700 transition text-xs"
+                                    >
+                                      Save
+                                    </button>
+                                    <button
+                                      onClick={handleCancelEdit}
+                                      className="bg-gray-600 px-2 py-1 rounded text-white hover:bg-gray-700 transition text-xs"
+                                    >
+                                      Cancel
+                                    </button>
                                   </div>
-                                ) : (
-                                  <div className="flex flex-col items-center">
-                                    <span>{cell.conjugation}</span>
-                                    <div className="flex space-x-2 mt-1">
-                                      <button
-                                        onClick={() => handleEdit(cell)}
-                                        className="bg-blue-600 px-2 py-1 rounded text-white hover:bg-blue-700 transition-colors duration-150 text-xs"
-                                      >
-                                        Edit
-                                      </button>
-                                      <button
-                                        onClick={() => handleDelete(cell.id)}
-                                        className="bg-red-600 px-2 py-1 rounded text-white hover:bg-red-700 transition-colors duration-150 text-xs"
-                                      >
-                                        Delete
-                                      </button>
-                                    </div>
-                                  </div>
-                                )
+                                </div>
                               ) : (
-                                "-"
+                                <div className="flex flex-col items-center">
+                                  <span>{cell.conjugation}</span>
+                                  {allowIrregular && (
+                                    <span className="mt-1 text-sm">
+                                      {cell.irregular ? "✅ Irregular" : "❌ Regular"}
+                                    </span>
+                                  )}
+                                  <div className="flex space-x-2 mt-1">
+                                    <button
+                                      onClick={() => handleEdit(cell)}
+                                      className="bg-blue-600 px-2 py-1 rounded text-white hover:bg-blue-700 transition text-xs"
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      onClick={() => handleDelete(cell.id)}
+                                      className="bg-red-600 px-2 py-1 rounded text-white hover:bg-red-700 transition text-xs"
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                </div>
                               )}
                             </td>
                           );
@@ -465,5 +507,3 @@ function ConjugationListPage() {
     </div>
   );
 }
-
-export default ConjugationListPage;

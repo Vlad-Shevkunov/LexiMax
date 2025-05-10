@@ -2,6 +2,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import { logoutUser } from "../services/api";
+import logo from "../assets/logo2.png";
 
 export default function Navbar() {
   const location = useLocation();
@@ -81,8 +82,12 @@ export default function Navbar() {
     >
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
         {/* Brand */}
-        <Link to="/" className="text-lg font-bold hover:text-gray-300 transition">
-          LexiMax
+        <Link to="/" className="flex items-center hover:opacity-80 transition">
+          <img
+            src={logo}
+            alt="LexiMax"
+            className="h-8"
+          />
         </Link>
 
         {/* only show once logged in */}

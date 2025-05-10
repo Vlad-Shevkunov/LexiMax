@@ -1,13 +1,27 @@
+// src/pages/WordsListPage.jsx
 import { useEffect, useState } from "react";
-import { getWords, updateWord, deleteWord } from "../services/api";
+import { getWords, updateWord, deleteWord, getSettings } from "../services/api";
 
-function WordsListPage() {
+export default function WordsListPage() {
   const [words, setWords] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [editData, setEditData] = useState({});
 
+  // settings lists
+  const [partsList, setPartsList] = useState([]);
+  const [articlesList, setArticlesList] = useState([]);
+  const [classesList, setClassesList] = useState([]);
+
   useEffect(() => {
     fetchWords();
+    getSettings()
+      .then((s) => {
+        const vocab = s.vocab || {};
+        setPartsList(vocab.partsOfSpeech || []);
+        setArticlesList(vocab.articles || []);
+        setClassesList(vocab.classes || []);
+      })
+      .catch((err) => console.error("Failed to load settings:", err));
   }, []);
 
   const fetchWords = async () => {
@@ -21,8 +35,11 @@ function WordsListPage() {
 
   const handleEdit = (word) => {
     setEditingId(word.id);
-    // Make a copy of the translations array so we can edit them
-    setEditData({ ...word, translations: [...word.translations] });
+    setEditData({
+      ...word,
+      translations: [...word.translations],
+      word_class: word.class || ""
+    });
   };
 
   const handleCancelEdit = () => {
@@ -35,9 +52,9 @@ function WordsListPage() {
   };
 
   const handleTranslationChange = (index, value) => {
-    const updatedTranslations = [...editData.translations];
-    updatedTranslations[index] = value;
-    setEditData({ ...editData, translations: updatedTranslations });
+    const updated = [...editData.translations];
+    updated[index] = value;
+    setEditData({ ...editData, translations: updated });
   };
 
   const handleAddTranslation = () => {
@@ -48,25 +65,25 @@ function WordsListPage() {
   };
 
   const handleDeleteTranslation = (index) => {
-    const updatedTranslations = [...editData.translations];
-    updatedTranslations.splice(index, 1);
-
-    if (updatedTranslations.length === 0) {
+    const updated = [...editData.translations];
+    if (updated.length === 1) {
       alert("At least one translation is required!");
       return;
     }
-
-    setEditData({ ...editData, translations: updatedTranslations });
+    updated.splice(index, 1);
+    setEditData({ ...editData, translations: updated });
   };
 
   const handleSave = async () => {
     try {
+      // note: updateWord signature now includes word_class
       await updateWord(
         editData.id,
         editData.word,
         editData.translations,
         editData.part_of_speech,
-        editData.article === "none" ? null : editData.article
+        editData.article,
+        editData.word_class
       );
       fetchWords();
       setEditingId(null);
@@ -78,7 +95,7 @@ function WordsListPage() {
   const handleDelete = async (wordId) => {
     try {
       await deleteWord(wordId);
-      setWords((prev) => prev.filter((word) => word.id !== wordId));
+      setWords((prev) => prev.filter((w) => w.id !== wordId));
     } catch (error) {
       console.error("Error deleting word:", error);
     }
@@ -101,8 +118,15 @@ function WordsListPage() {
             <tr>
               <th className="p-3 border border-gray-700">Word</th>
               <th className="p-3 border border-gray-700">Translations</th>
-              <th className="p-3 border border-gray-700">Part of Speech</th>
-              <th className="p-3 border border-gray-700">Article</th>
+              {partsList.length > 0 && (
+                <th className="p-3 border border-gray-700">Part of Speech</th>
+              )}
+              {articlesList.length > 0 && (
+                <th className="p-3 border border-gray-700">Article</th>
+              )}
+              {classesList.length > 0 && (
+                <th className="p-3 border border-gray-700">Class</th>
+              )}
               <th className="p-3 border border-gray-700">Actions</th>
             </tr>
           </thead>
@@ -120,6 +144,7 @@ function WordsListPage() {
                 >
                   {isEditing ? (
                     <>
+                      {/* Word */}
                       <td className="p-3 border border-gray-700">
                         <input
                           type="text"
@@ -132,17 +157,18 @@ function WordsListPage() {
                         />
                       </td>
 
+                      {/* Translations */}
                       <td className="p-3 border border-gray-700 align-top">
-                        {editData.translations.map((translation, index) => (
+                        {editData.translations.map((t, i) => (
                           <div
-                            key={index}
+                            key={i}
                             className="flex items-center space-x-2 mb-2"
                           >
                             <input
                               type="text"
-                              value={translation}
+                              value={t}
                               onChange={(e) =>
-                                handleTranslationChange(index, e.target.value)
+                                handleTranslationChange(i, e.target.value)
                               }
                               className="
                                 bg-gray-700 border border-gray-600 rounded p-2 w-full
@@ -150,7 +176,7 @@ function WordsListPage() {
                               "
                             />
                             <button
-                              onClick={() => handleDeleteTranslation(index)}
+                              onClick={() => handleDeleteTranslation(i)}
                               className="
                                 bg-red-600 px-2 py-1 rounded text-white
                                 hover:bg-red-700 transition-colors duration-150
@@ -160,7 +186,6 @@ function WordsListPage() {
                             </button>
                           </div>
                         ))}
-
                         <button
                           onClick={handleAddTranslation}
                           className="
@@ -172,48 +197,71 @@ function WordsListPage() {
                         </button>
                       </td>
 
-                      <td className="p-3 border border-gray-700">
-                        <select
-                          value={editData.part_of_speech}
-                          onChange={(e) => handleChange(e, "part_of_speech")}
-                          className="
-                            bg-gray-700 border border-gray-600 rounded p-2 w-full
-                            focus:outline-none focus:ring-2 focus:ring-blue-500
-                          "
-                        >
-                          <option value="noun">Noun</option>
-                          <option value="verb">Verb</option>
-                          <option value="adjective">Adjective</option>
-                          <option value="adverb">Adverb</option>
-                          <option value="pronoun">Pronoun</option>
-                          <option value="preposition">Preposition</option>
-                          <option value="conjunction">Conjunction</option>
-                          <option value="interjection">Interjection</option>
-                          <option value="numeral">Numeral</option>
-                          <option value="phrase">Phrase</option>
-                        </select>
-                      </td>
+                      {/* Part of Speech */}
+                      {partsList.length > 0 && (
+                        <td className="p-3 border border-gray-700">
+                          <select
+                            value={editData.part_of_speech}
+                            onChange={(e) =>
+                              handleChange(e, "part_of_speech")
+                            }
+                            className="
+                              bg-gray-700 border border-gray-600 rounded p-2 w-full
+                              focus:outline-none focus:ring-2 focus:ring-blue-500
+                            "
+                          >
+                            {partsList.map((p) => (
+                              <option key={p} value={p}>
+                                {p.charAt(0).toUpperCase() + p.slice(1)}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      )}
 
-                      <td className="p-3 border border-gray-700">
-                        <select
-                          value={editData.article}
-                          onChange={(e) => handleChange(e, "article")}
-                          className="
-                            bg-gray-700 border border-gray-600 rounded p-2 w-full
-                            focus:outline-none focus:ring-2 focus:ring-blue-500
-                          "
-                        >
-                          <option value="none">No Article</option>
-                          <option value="un">un</option>
-                          <option value="une">une</option>
-                          <option value="des">des</option>
-                          <option value="le">le</option>
-                          <option value="la">la</option>
-                          <option value="les">les</option>
-                          <option value="l'">l'</option>
-                        </select>
-                      </td>
+                      {/* Article */}
+                      {articlesList.length > 0 && (
+                        <td className="p-3 border border-gray-700">
+                          <select
+                            value={editData.article || ""}
+                            onChange={(e) => handleChange(e, "article")}
+                            className="
+                              bg-gray-700 border border-gray-600 rounded p-2 w-full
+                              focus:outline-none focus:ring-2 focus:ring-blue-500
+                            "
+                          >
+                            <option value="">No Article</option>
+                            {articlesList.map((a) => (
+                              <option key={a} value={a}>
+                                {a}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      )}
 
+                      {/* Class */}
+                      {classesList.length > 0 && (
+                        <td className="p-3 border border-gray-700">
+                          <select
+                            value={editData.word_class}
+                            onChange={(e) => handleChange(e, "word_class")}
+                            className="
+                              bg-gray-700 border border-gray-600 rounded p-2 w-full
+                              focus:outline-none focus:ring-2 focus:ring-blue-500
+                            "
+                          >
+                            <option value="">No Class</option>
+                            {classesList.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      )}
+
+                      {/* Actions */}
                       <td className="p-3 border border-gray-700 flex space-x-2">
                         <button
                           onClick={handleSave}
@@ -237,16 +285,26 @@ function WordsListPage() {
                     </>
                   ) : (
                     <>
+                      {/* Display Mode */}
                       <td className="p-3 border border-gray-700">{word.word}</td>
                       <td className="p-3 border border-gray-700">
                         {word.translations.join(", ")}
                       </td>
-                      <td className="p-3 border border-gray-700">
-                        {word.part_of_speech}
-                      </td>
-                      <td className="p-3 border border-gray-700">
-                        {word.article || "None"}
-                      </td>
+                      {partsList.length > 0 && (
+                        <td className="p-3 border border-gray-700">
+                          {word.part_of_speech}
+                        </td>
+                      )}
+                      {articlesList.length > 0 && (
+                        <td className="p-3 border border-gray-700">
+                          {word.article || "None"}
+                        </td>
+                      )}
+                      {classesList.length > 0 && (
+                        <td className="p-3 border border-gray-700">
+                          {word.class || "None"}
+                        </td>
+                      )}
                       <td className="p-3 border border-gray-700 flex space-x-2">
                         <button
                           onClick={() => handleEdit(word)}
@@ -278,5 +336,3 @@ function WordsListPage() {
     </div>
   );
 }
-
-export default WordsListPage;

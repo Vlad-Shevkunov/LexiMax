@@ -15,6 +15,7 @@ function RegisterPage() {
     try {
       await registerUser(username, password);
       toast.success("Successfully registered as " + username);
+      navigate("/settings");
     } catch (err) {
         setError("Registration failed");
         toast.error("Registration failed!");
