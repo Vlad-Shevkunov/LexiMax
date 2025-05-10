@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import { logoutUser } from "../services/api";
-import logo from "../assets/logo2.png";
+import logo from "../assets/Logo2.png";
 
 export default function Navbar() {
   const location = useLocation();
