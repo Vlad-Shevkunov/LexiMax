@@ -1,6 +1,7 @@
 // src/pages/WordsListPage.jsx
 import { useEffect, useState } from "react";
 import { getWords, updateWord, deleteWord, getSettings } from "../services/api";
+import { toast } from "react-toastify";
 
 export default function WordsListPage() {
   const [words, setWords] = useState([]);
@@ -87,8 +88,10 @@ export default function WordsListPage() {
       );
       fetchWords();
       setEditingId(null);
+      toast.success("Updated word!");
     } catch (error) {
       console.error("Error updating word:", error);
+      toast.error("Failed to update word.");
     }
   };
 
@@ -96,8 +99,10 @@ export default function WordsListPage() {
     try {
       await deleteWord(wordId);
       setWords((prev) => prev.filter((w) => w.id !== wordId));
+      toast.success("Deleted word!");
     } catch (error) {
       console.error("Error deleting word:", error);
+      toast.error("Failed to delete word.");
     }
   };
 

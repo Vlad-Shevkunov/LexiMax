@@ -322,42 +322,42 @@ function StatsPage() {
           </div>
         </div>
       </div>
-
-      {/* Best/Worst Tables */}
-      <div className="max-w-5xl w-full grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-gray-900 p-6 rounded-lg shadow-lg">
-          <h3 className="text-lg font-bold mb-4 text-green-400">Best Words</h3>
-          {bestWords.length > 0 ? (
-            renderTable(bestWords, "Word", "text-green-400", true)
-          ) : (
-            <p className="text-gray-400">No data</p>
-          )}
+      { dateRange=='all' && (
+        <div className="max-w-5xl w-full grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-gray-900 p-6 rounded-lg shadow-lg">
+            <h3 className="text-lg font-bold mb-4 text-green-400">Best Words</h3>
+            {bestWords.length > 0 ? (
+              renderTable(bestWords, "Word", "text-green-400", true)
+            ) : (
+              <p className="text-gray-400">No data</p>
+            )}
+          </div>
+          <div className="bg-gray-900 p-6 rounded-lg shadow-lg">
+            <h3 className="text-lg font-bold mb-4 text-red-400">Worst Words</h3>
+            {worstWords.length > 0 ? (
+              renderTable(worstWords, "Word", "text-red-400", true)
+            ) : (
+              <p className="text-gray-400">No data</p>
+            )}
+          </div>
+          <div className="bg-gray-900 p-6 rounded-lg shadow-lg">
+            <h3 className="text-lg font-bold mb-4 text-green-400">Best Conjugations</h3>
+            {bestConjugations.length > 0 ? (
+              renderTable(bestConjugations, "Conjugation", "text-green-400", false)
+            ) : (
+              <p className="text-gray-400">No data</p>
+            )}
+          </div>
+          <div className="bg-gray-900 p-6 rounded-lg shadow-lg">
+            <h3 className="text-lg font-bold mb-4 text-red-400">Worst Conjugations</h3>
+            {worstConjugations.length > 0 ? (
+              renderTable(worstConjugations, "Conjugation", "text-red-400", false)
+            ) : (
+              <p className="text-gray-400">No data</p>
+            )}
+          </div>
         </div>
-        <div className="bg-gray-900 p-6 rounded-lg shadow-lg">
-          <h3 className="text-lg font-bold mb-4 text-red-400">Worst Words</h3>
-          {worstWords.length > 0 ? (
-            renderTable(worstWords, "Word", "text-red-400", true)
-          ) : (
-            <p className="text-gray-400">No data</p>
-          )}
-        </div>
-        <div className="bg-gray-900 p-6 rounded-lg shadow-lg">
-          <h3 className="text-lg font-bold mb-4 text-green-400">Best Conjugations</h3>
-          {bestConjugations.length > 0 ? (
-            renderTable(bestConjugations, "Conjugation", "text-green-400", false)
-          ) : (
-            <p className="text-gray-400">No data</p>
-          )}
-        </div>
-        <div className="bg-gray-900 p-6 rounded-lg shadow-lg">
-          <h3 className="text-lg font-bold mb-4 text-red-400">Worst Conjugations</h3>
-          {worstConjugations.length > 0 ? (
-            renderTable(worstConjugations, "Conjugation", "text-red-400", false)
-          ) : (
-            <p className="text-gray-400">No data</p>
-          )}
-        </div>
-      </div>
+      )}
     </div>
   );
 }

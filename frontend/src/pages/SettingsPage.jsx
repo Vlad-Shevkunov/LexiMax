@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { getSettings, saveSettings } from "../services/api";
 import { toast } from "react-toastify";
 
@@ -45,12 +45,23 @@ export default function SettingsPage() {
 
   // Editable pill-list component with refined styling
   const EditableList = ({ label, items, setItems }) => {
-    const add = () => {
-      const v = prompt(`New ${label}:`);
-      if (v) setItems([...items, v]);
+    const [isAdding, setIsAdding] = useState(false);
+    const [newText, setNewText] = useState("");
+    const inputRef = useRef(null);
+  
+    useEffect(() => {
+      if (isAdding && inputRef.current) {
+        inputRef.current.focus();
+      }
+    }, [isAdding]);
+  
+    const finishAdd = () => {
+      const trimmed = newText.trim();
+      if (trimmed) setItems([...items, trimmed]);
+      setNewText("");
+      setIsAdding(false);
     };
-    const remove = (i) => setItems(items.filter((_, idx) => idx !== i));
-
+  
     return (
       <div className="mb-6">
         <h4 className="font-semibold text-lg text-indigo-400 mb-3">{label}</h4>
@@ -62,11 +73,11 @@ export default function SettingsPage() {
             >
               <span className="whitespace-nowrap">{it}</span>
               <button
-                onClick={() => remove(i)}
+                onClick={() => setItems(items.filter((_, idx) => idx !== i))}
                 className="ml-2 p-1 rounded-full hover:bg-red-500 hover:bg-opacity-25 transition"
                 aria-label={`Remove ${it}`}
               >
-                <svg
+              <svg
                   xmlns="http://www.w3.org/2000/svg"
                   className="h-4 w-4 text-red-400"
                   fill="none"
@@ -83,16 +94,31 @@ export default function SettingsPage() {
               </button>
             </div>
           ))}
-          <button
-            onClick={add}
-            className="text-sm text-indigo-300 hover:text-indigo-200 underline"
-          >
-            + Add {label}
-          </button>
+  
+          {isAdding ? (
+            <input
+              ref={inputRef}
+              type="text"
+              value={newText}
+              onChange={e => setNewText(e.target.value)}
+              onBlur={finishAdd}
+              onKeyDown={e => e.key === "Enter" && finishAdd()}
+              className="px-4 py-2 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              placeholder={`New ${label}…`}
+            />
+          ) : (
+            <button
+              onClick={() => setIsAdding(true)}
+              className="text-sm text-indigo-300 hover:text-indigo-200 underline"
+            >
+              + Add {label}
+            </button>
+          )}
         </div>
       </div>
     );
   };
+  
 
   const saveAll = () => {
     const payload = {

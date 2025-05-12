@@ -6,6 +6,7 @@ import {
   deleteConjugation,
   getSettings,
 } from "../services/api";
+import { toast } from "react-toastify";
 
 export default function ConjugationListPage() {
   // ── Loaded Settings ───────────────────────────────────────────────
@@ -104,16 +105,20 @@ export default function ConjugationListPage() {
       );
       fetchConjugations();
       setEditingId(null);
+      toast.success("Updated conjugation!");
     } catch (e) {
       console.error("Error saving conjugation:", e);
+      toast.error("Failed to save conjugation.");
     }
   };
   const handleDelete = async (id) => {
     try {
       await deleteConjugation(id);
       setConjugations((prev) => prev.filter((c) => c.id !== id));
+      toast.success("Deleted conjugation!");
     } catch (e) {
       console.error("Error deleting conjugation:", e);
+      toast.error("Failed to delete conjugation.");
     }
   };
 
