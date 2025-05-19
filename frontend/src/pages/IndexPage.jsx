@@ -13,14 +13,31 @@ export default function IndexPage() {
           <img src={logo} alt="LexiMax" className="h-20" />
         </div>
 
-        {/* Intro */}
+        {/* Intro with embedded video */}
         <section
           id="intro"
-          className="space-y-4 bg-gray-800 bg-opacity-50 rounded-lg p-6 shadow-lg transform hover:scale-[1.02] transition"
+          className="space-y-6 bg-gray-800 bg-opacity-50 rounded-lg p-6 shadow-lg transform hover:scale-[1.02] transition"
         >
           <h1 className="text-5xl font-bold text-indigo-400">
             Welcome to LexiMax
           </h1>
+
+          {/* Responsive YouTube embed */}
+          <div className="relative" style={{ paddingTop: "56.25%" /* 9/16 = 0.5625 */ }}>
+            <iframe
+              className="absolute top-0 left-0 w-full h-full rounded-md shadow-inner"
+              src="https://www.youtube.com/embed/PAmbvIzu_hc?rel=0"
+              title="LexiMax Intro!"
+              frameBorder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              loading="lazy"
+            />
+          </div>
+
+
+          
+
           <p className="text-lg">
             LexiMax helps you master your vocabulary and conjugations with
             interactive games, progress tracking, and a sleek,
