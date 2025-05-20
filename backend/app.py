@@ -26,9 +26,11 @@ CORS(app,
      resources={r"/*": {"origins": origins}},
      supports_credentials=True)
 
-app.config['SESSION_COOKIE_SAMESITE'] = 'None'
-app.config['SESSION_COOKIE_SECURE'] = True  # Set True if you serve over HTTPS
-app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config.update(
+    SESSION_COOKIE_DOMAIN   = os.environ.get("SESSION_COOKIE_DOMAIN"),
+    SESSION_COOKIE_SAMESITE = os.environ.get("SESSION_COOKIE_SAMESITE"),
+    SESSION_COOKIE_SECURE   = os.environ.get("SESSION_COOKIE_SECURE") == "True",
+)
 
 
 app.secret_key = os.environ.get("SECRET_KEY")
