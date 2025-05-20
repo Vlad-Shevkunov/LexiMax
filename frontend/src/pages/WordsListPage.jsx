@@ -1,5 +1,5 @@
 // src/pages/WordsListPage.jsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { getWords, updateWord, deleteWord, getSettings } from "../services/api";
 import { toast } from "react-toastify";
 
@@ -13,6 +13,13 @@ export default function WordsListPage() {
   const [articlesList, setArticlesList] = useState([]);
   const [classesList, setClassesList] = useState([]);
 
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterPart,  setFilterPart]  = useState("");
+  const [filterArticle, setFilterArticle] = useState("");
+  const [filterClass, setFilterClass] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+
+
   useEffect(() => {
     fetchWords();
     getSettings()
@@ -24,6 +31,34 @@ export default function WordsListPage() {
       })
       .catch((err) => console.error("Failed to load settings:", err));
   }, []);
+
+  const displayedWords = useMemo(() => {
+    return words.filter((w) => {
+      const term = searchTerm.toLowerCase();
+      const matchesText =
+        w.word.toLowerCase().includes(term) ||
+        w.translations.some(t => t.toLowerCase().includes(term));
+
+      const matchesPart = filterPart
+        ? w.part_of_speech === filterPart
+        : true;
+
+      const matchesArticle = filterArticle
+        ? (filterArticle === "None"
+            ? !w.article
+            : w.article === filterArticle)
+        : true;
+
+      const matchesClass = filterClass
+        ? (filterClass === "None"
+            ? !w.class
+            : w.class === filterClass)
+        : true;
+
+      return matchesText && matchesPart && matchesArticle && matchesClass;
+    });
+  }, [words, searchTerm, filterPart, filterArticle, filterClass]);
+
 
   const fetchWords = async () => {
     try {
@@ -116,7 +151,83 @@ export default function WordsListPage() {
       "
     >
       <div className="w-full max-w-5xl bg-gray-900 p-6 rounded-lg shadow-lg overflow-x-auto">
+
         <h1 className="text-3xl font-bold mb-6 text-center">Word List</h1>
+        <div className="flex items-center justify-center mb-4">
+          <button
+            onClick={() => setShowFilters(f => !f)}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-center text-white transition"
+          >
+            {showFilters ? "Hide Filters" : "Show Filters"}
+          </button>
+        </div>
+
+        {showFilters && (
+          <div className="flex flex-wrap gap-4 mb-4">
+            <input
+              type="text"
+              placeholder="Search word or translation…"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="bg-gray-700 border-gray-600 rounded p-2 flex-grow focus:ring-2"
+            />
+
+            {partsList.length > 0 && (
+              <select
+                value={filterPart}
+                onChange={e => setFilterPart(e.target.value)}
+                className="bg-gray-700 border-gray-600 rounded p-2 focus:ring-2"
+              >
+                <option value="">All Parts</option>
+                {partsList.map(p => (
+                  <option key={p} value={p}>
+                    {p.charAt(0).toUpperCase() + p.slice(1)}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {articlesList.length > 0 && (
+              <select
+                value={filterArticle}
+                onChange={e => setFilterArticle(e.target.value)}
+                className="bg-gray-700 border-gray-600 rounded p-2 focus:ring-2"
+              >
+                <option value="">All Articles</option>
+                <option value="None">None</option>
+                {articlesList.map(a => (
+                  <option key={a} value={a}>{a}</option>
+                ))}
+              </select>
+            )}
+
+            {classesList.length > 0 && (
+              <select
+                value={filterClass}
+                onChange={e => setFilterClass(e.target.value)}
+                className="bg-gray-700 border-gray-600 rounded p-2 focus:ring-2"
+              >
+                <option value="">All Classes</option>
+                <option value="None">None</option>
+                {classesList.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            )}
+
+            <button
+              onClick={() => {
+                setSearchTerm("");
+                setFilterPart("");
+                setFilterArticle("");
+                setFilterClass("");
+              }}
+              className="bg-gray-600 px-3 py-1 rounded hover:bg-gray-700"
+            >
+              Clear
+            </button>
+          </div>
+        )}
 
         <table className="w-full text-left border-collapse border border-gray-700 rounded-lg">
           <thead className="bg-gray-800 text-white">
@@ -137,7 +248,7 @@ export default function WordsListPage() {
           </thead>
 
           <tbody>
-            {words.map((word) => {
+            {displayedWords.map((word) => {
               const isEditing = editingId === word.id;
               return (
                 <tr

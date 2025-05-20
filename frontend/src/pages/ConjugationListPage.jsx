@@ -1,5 +1,5 @@
 // src/pages/ConjugationListPage.jsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   getConjugations,
   updateConjugation,
@@ -26,6 +26,18 @@ export default function ConjugationListPage() {
   // ── View Mode: "row" or "verb" ────────────────────────────────────
   const [viewMode, setViewMode] = useState("row");
 
+  // whether to show the filter panel
+  const [showFilters, setShowFilters] = useState(false);
+
+  // filter criteria
+  const [searchVerb,    setSearchVerb]    = useState("");
+  const [filterPerson,  setFilterPerson]  = useState("");
+  const [filterTense,   setFilterTense]   = useState("");
+  const [filterGroup,   setFilterGroup]   = useState("");
+  const [onlyPronominal,setOnlyPronominal]= useState(false);
+  const [onlyIrregular, setOnlyIrregular] = useState(false);
+
+
   // ── Fetch user settings on mount ──────────────────────────────────
   useEffect(() => {
     getSettings()
@@ -49,6 +61,45 @@ export default function ConjugationListPage() {
       });
   }, []);
 
+  const displayed = useMemo(() => {
+    return conjugations.filter(c => {
+      // 1) search verb text
+      if (
+        searchVerb &&
+        !c.verb.toLowerCase().includes(searchVerb.toLowerCase())
+      ) return false;
+  
+      // 2) filter by person
+      if (filterPerson && c.person !== filterPerson) return false;
+  
+      // 3) filter by tense
+      if (filterTense && c.tense !== filterTense) return false;
+  
+      // 4) filter by group (0 for unknown)
+      if (
+        filterGroup &&
+        String(c.verb_group) !== String(filterGroup)
+      ) return false;
+  
+      // 5) pronominal only?
+      if (onlyPronominal && !c.pronominal) return false;
+  
+      // 6) irregular only?
+      if (onlyIrregular && !c.irregular) return false;
+  
+      return true;
+    });
+  }, [
+    conjugations,
+    searchVerb,
+    filterPerson,
+    filterTense,
+    filterGroup,
+    onlyPronominal,
+    onlyIrregular,
+  ]);
+  
+
   // ── Fetch conjugations whenever the page mounts or after edits ────
   useEffect(() => {
     fetchConjugations();
@@ -68,7 +119,7 @@ export default function ConjugationListPage() {
   }
 
   // Group for "verb" view
-  const grouped = conjugations.reduce((acc, c) => {
+  const grouped = displayed.reduce((acc, c) => {
     (acc[c.verb] = acc[c.verb] || []).push(c);
     return acc;
   }, {});
@@ -174,20 +225,120 @@ export default function ConjugationListPage() {
       <div className="w-full max-w-5xl bg-gray-900 p-6 rounded-lg shadow-lg overflow-x-auto mx-auto">
         <h1 className="text-3xl font-bold mb-6 text-center">Conjugation List</h1>
 
-        {/* Toggle */}
-        <div className="flex justify-center mb-4 space-x-4">
-          {["row", "verb"].map((m) => (
+        {/* header + toggle */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="space-x-2">
             <button
-              key={m}
-              onClick={() => setViewMode(m)}
+              onClick={() => setViewMode("row")}
               className={`px-4 py-2 rounded ${
-                viewMode === m ? "bg-blue-600" : "bg-gray-600"
-              } text-white font-semibold`}
+                viewMode === "row" ? "bg-blue-600" : "bg-gray-600"
+              } text-white`}
             >
-              {m === "row" ? "Row View" : "Verb View"}
+              Row View
             </button>
-          ))}
+            <button
+              onClick={() => setViewMode("verb")}
+              className={`px-4 py-2 rounded ${
+                viewMode === "verb" ? "bg-blue-600" : "bg-gray-600"
+              } text-white`}
+            >
+              Verb View
+            </button>
+          </div>
+          <button
+            onClick={() => setShowFilters(f => !f)}
+            className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-white"
+          >
+            {showFilters ? "Hide Filters" : "Show Filters"}
+          </button>
         </div>
+        
+        {showFilters && (
+          <div className="bg-gray-800 p-4 rounded-lg shadow mb-6 grid grid-cols-[1fr,auto,auto,auto,auto,auto,auto] gap-4 items-center">
+            {/* Search verb */}
+            <input
+              type="text"
+              placeholder="Search verb…"
+              value={searchVerb}
+              onChange={e => setSearchVerb(e.target.value)}
+              className="px-3 py-2 bg-gray-700 rounded focus:ring-2 w-full"
+            />
+
+            {/* Person */}
+            <select
+              value={filterPerson}
+              onChange={e => setFilterPerson(e.target.value)}
+              className="px-3 py-2 bg-gray-700 rounded focus:ring-2"
+            >
+              <option value="">All Persons</option>
+              {persons.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+
+            {/* Tense */}
+            <select
+              value={filterTense}
+              onChange={e => setFilterTense(e.target.value)}
+              className="px-3 py-2 bg-gray-700 rounded focus:ring-2"
+            >
+              <option value="">All Tenses</option>
+              {tenses.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+
+            {/* Group */}
+            {groups.length > 0 && (
+              <select
+                value={filterGroup}
+                onChange={e => setFilterGroup(e.target.value)}
+                className="px-3 py-2 bg-gray-700 rounded focus:ring-2"
+              >
+                <option value="">All Groups</option>
+                <option value="0">0 – Unknown</option>
+                {groups.map(g => <option key={g} value={g}>{g}</option>)}
+              </select>
+            )}
+
+            {/* Pronominal only */}
+            {allowPronominal && (
+              <label className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  checked={onlyPronominal}
+                  onChange={() => setOnlyPronominal(x => !x)}
+                  className="h-4 w-4"
+                />
+                <span>Pronominal</span>
+              </label>
+            )}
+
+            {/* Irregular only */}
+            {allowIrregular && (
+              <label className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  checked={onlyIrregular}
+                  onChange={() => setOnlyIrregular(x => !x)}
+                  className="h-4 w-4"
+                />
+                <span>Irregular</span>
+              </label>
+            )}
+
+            {/* Clear */}
+            <button
+              onClick={() => {
+                setSearchVerb("");
+                setFilterPerson("");
+                setFilterTense("");
+                setFilterGroup("");
+                setOnlyPronominal(false);
+                setOnlyIrregular(false);
+              }}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded text-white"
+            >
+              Clear
+            </button>
+          </div>
+        )}
 
         {viewMode === "row" ? (
           <table className="w-full text-left border-collapse border border-gray-700 rounded-lg">
@@ -204,7 +355,7 @@ export default function ConjugationListPage() {
               </tr>
             </thead>
             <tbody>
-              {conjugations.map((c) => {
+              {displayed.map((c) => {
                 const editing = editingId === c.id;
                 return (
                   <tr
