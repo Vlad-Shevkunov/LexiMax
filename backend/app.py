@@ -28,6 +28,7 @@ CORS(app,
 
 app.config['SESSION_COOKIE_SAMESITE'] = 'None'
 app.config['SESSION_COOKIE_SECURE'] = True  # Set True if you serve over HTTPS
+app.config['SESSION_COOKIE_HTTPONLY'] = True
 
 
 app.secret_key = os.environ.get("SECRET_KEY")
